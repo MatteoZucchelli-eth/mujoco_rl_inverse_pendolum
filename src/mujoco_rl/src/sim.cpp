@@ -81,7 +81,7 @@ void Sim::create_data() {
     global_done_buffer.resize((size_t)num_envs);
 
     std::cout << "Created data for device with number of cores: " << n_cores_ <<std::endl;
-    std::cout << "Each core  will execute: " << envs_per_thread_ << "simulations" << std::endl;
+    std::cout << "Each core  will execute: " << envs_per_thread_ << " simulations" << std::endl;
     
 }
 

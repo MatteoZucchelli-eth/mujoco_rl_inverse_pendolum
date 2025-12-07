@@ -7,12 +7,21 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(OpenMP REQUIRED)
 
-include_directories(include)
+# Set MuJoCo paths
+set(MUJOCO_DIR /app/lib/mujoco)
+include_directories(include ${MUJOCO_DIR}/include)
+link_directories(${MUJOCO_DIR}/lib)
 
 add_executable(mujoco_rl
   src/main.cpp
   src/sim.cpp
+)
+
+target_link_libraries(mujoco_rl
+  mujoco
+  OpenMP::OpenMP_CXX
 )
 
 ament_target_dependencies(mujoco_rl)

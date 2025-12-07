@@ -45,7 +45,8 @@ RUN cd /tmp && \
 
 # Setup bashrc to source ROS2 and workspace automatically
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
-    echo "source /app/install/setup.bash" >> ~/.bashrc
+    echo "source /app/install/setup.bash" >> ~/.bashrc && \
+    echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc
 
 # Copy naro_msgs package files
 COPY src/ /app/src/

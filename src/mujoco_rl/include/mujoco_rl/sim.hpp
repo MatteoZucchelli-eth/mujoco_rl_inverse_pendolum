@@ -1,13 +1,26 @@
-#include <memory>       
-#include <unordered_map>
-#include <string>  
+#include <mujoco/mujoco.h>
+#include <memory>
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+#include <omp.h>
+#include <mujoco_rl_utils/utils.hpp>
 
 class Sim {
 public:
-    Sim::Sim();
-    void set_ctrl(std::shared_ptr<std::unordered_map<std::string, double>> ctrl_ptr);
-    void create_model(std::string model_path);
+    Sim();
+    void create_model(char* filename);
+    void create_data();
 private:
-    std::shared_ptr<std::unordered_map<std::string, double>> ctrl_ptr;
+    MjModelPtr m_;
+    std::vector<MjDataPtr> d_;
+
+    // Settings
+    int num_envs = 1000;
+    int obs_dim = 10;
+    int action_dim = 10;
+
+    std::vector<float> global_observation_buffer;
+    std::vector<float> global_action_buffer;
 
 };

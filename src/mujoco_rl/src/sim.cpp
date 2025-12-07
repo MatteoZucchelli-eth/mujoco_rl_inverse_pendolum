@@ -24,7 +24,10 @@ void Sim::init() {
         
         // Optional: Apply initial randomization here
         
-        // At the beginning we save this state for every env
+        // Save this pristine initial state (never overwritten)
+        save_initial_state(i, d_[0].get());
+        
+        // Also save to current state buffer so first step can begin
         save_simstate(i, d_[0].get());
     }
 }
@@ -78,6 +81,7 @@ void Sim::create_data() {
     global_observation_buffer.resize((size_t)num_envs * (size_t)obs_dim);
     global_action_buffer.resize((size_t)num_envs * (size_t)action_dim);
     global_simstate_buffer.resize((size_t)num_envs * (size_t)state_dim_);
+    global_initial_state_buffer.resize((size_t)num_envs * (size_t)state_dim_);  // Separate buffer for pristine initial states
     global_done_buffer.resize((size_t)num_envs);
 
     std::cout << "Created data for device with number of cores: " << n_cores_ <<std::endl;
@@ -175,6 +179,96 @@ void Sim::load_simstate(int env_id, mjData* d) {
     ptr += m_->nv;
 }
 
+// Save pristine initial state (called once per environment in init())
+void Sim::save_initial_state(int env_id, mjData* d) {
+    int offset = env_id * state_dim_;
+    double* dst = &global_initial_state_buffer[offset];
+
+    double* ptr = dst;
+
+    // 1. Time (1)
+    *ptr = d->time; 
+    ptr++;
+
+    // 2. QPOS (nq)
+    mju_copy(ptr, d->qpos, m_->nq); 
+    ptr += m_->nq;
+
+    // 3. QVEL (nv)
+    mju_copy(ptr, d->qvel, m_->nv); 
+    ptr += m_->nv;
+
+    // 4. ACT (na) - Only if model has actuators/muscles
+    if (m_->na > 0) {
+        mju_copy(ptr, d->act, m_->na); 
+        ptr += m_->na;
+    }
+    
+    // 5. MOCAP (if any)
+    if (m_->nmocap > 0) {
+        mju_copy(ptr, d->mocap_pos, 3 * m_->nmocap); 
+        ptr += 3 * m_->nmocap;
+
+        mju_copy(ptr, d->mocap_quat, 4 * m_->nmocap); 
+        ptr += 4 * m_->nmocap;
+    }
+
+    // 6. User Data
+    if (m_->nuserdata > 0) {
+        mju_copy(ptr, d->userdata, m_->nuserdata); 
+        ptr += m_->nuserdata;
+    }
+
+    // 7. Warm Start (Crucial for speed!)
+    mju_copy(ptr, d->qacc_warmstart, m_->nv); 
+    ptr += m_->nv;
+}
+
+// Load pristine initial state (used on reset)
+void Sim::load_initial_state(int env_id, mjData* d) {
+    int offset = env_id * state_dim_;
+    double* src = &global_initial_state_buffer[offset];
+
+    double* ptr = src;
+
+    // 1. Time (1)
+    d->time = *ptr; 
+    ptr++;
+
+    // 2. QPOS (nq)
+    mju_copy(d->qpos, ptr, m_->nq); 
+    ptr += m_->nq;
+
+    // 3. QVEL (nv)
+    mju_copy(d->qvel, ptr, m_->nv); 
+    ptr += m_->nv;
+
+    // 4. ACT (na) - Only if model has actuators/muscles
+    if (m_->na > 0) {
+        mju_copy(d->act, ptr, m_->na); 
+        ptr += m_->na;
+    }
+    
+    // 5. MOCAP (if any)
+    if (m_->nmocap > 0) {
+        mju_copy(d->mocap_pos, ptr, 3 * m_->nmocap); 
+        ptr += 3 * m_->nmocap;
+
+        mju_copy(d->mocap_quat, ptr, 4 * m_->nmocap); 
+        ptr += 4 * m_->nmocap;
+    }
+
+    // 6. User Data
+    if (m_->nuserdata > 0) {
+        mju_copy(d->userdata, ptr, m_->nuserdata); 
+        ptr += m_->nuserdata;
+    }
+
+    // 7. Warm Start (Crucial for speed!)
+    mju_copy(d->qacc_warmstart, ptr, m_->nv); 
+    ptr += m_->nv;
+}
+
 void Sim::add_noise(mjData* d) {
     
     // Add noise to each position
@@ -212,33 +306,37 @@ void Sim::step_parallel() {
             // step physics
             mj_step(model, data);
 
+            // Check if episode is done
             bool done = (data->time > max_sim_time_); // for now let's just check this. Eventually we can also add here with a or a terminal  condition given by the user
 
-            if (done) {
-                // reset physics
-                mj_resetData(model, data);
-
-                // randomize a little bit the new start
-                add_noise(data);
-
-                mj_forward(model, data);
-            }
-
-            global_done_buffer[i] = done;
-            // save state in the buffer
-            save_simstate(i, data);
-
-            // save observation.
-            // Here the user can also give us a get_observation function that 
-            // we will call on the mujoco data and put the result in the right place
-            // The function will need to take as input the mjdata pointer and return a vector of floats
-            // The function needs to be c++ to preserve parallelism
+            // IMPORTANT: Save observation BEFORE reset (this is the terminal observation if done)
+            // This follows proper RL convention where the returned observation corresponds to the done flag
             int obs_offset = i * obs_dim;
             for (int k = 0; k < obs_dim; k++) {
                 global_observation_buffer[obs_offset + k] = data->qpos[k];
             }
 
-            // handle reset if this is done
+            // Save the done flag
+            global_done_buffer[i] = done;
+            
+            // Save the current state (terminal state if done, regular state otherwise)
+            save_simstate(i, data);
+
+            // NOW handle reset if needed
+            if (done) {
+                // Load the pristine initial state
+                load_initial_state(i, data);
+
+                // Add randomization to the initial state
+                add_noise(data);
+
+                // Forward kinematics to ensure consistency
+                mj_forward(model, data);
+                
+                // Save this new starting state to the current state buffer
+                // so the next iteration starts from this randomized initial state
+                save_simstate(i, data);
+            }
         }
     }
 

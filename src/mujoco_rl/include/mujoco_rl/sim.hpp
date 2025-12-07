@@ -35,12 +35,15 @@ private:
     std::vector<float> global_observation_buffer;
     std::vector<float> global_action_buffer;
     std::vector<double> global_simstate_buffer;
+    std::vector<double> global_initial_state_buffer;  // Pristine initial states, never overwritten
     std::vector<bool> global_done_buffer;
 
     void worker_thread(int thread_id, int envs_per_thread);
 
     void save_simstate(int env_id, mjData* d);
     void load_simstate(int env_id, mjData* d);
+    void save_initial_state(int env_id, mjData* d);
+    void load_initial_state(int env_id, mjData* d);
 
     void apply_actions_thread(int thread_id);
     void get_observations_thread(int thread_id);

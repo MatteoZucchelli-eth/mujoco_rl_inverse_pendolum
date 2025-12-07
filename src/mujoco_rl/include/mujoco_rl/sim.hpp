@@ -20,10 +20,12 @@ private:
     std::vector<MjDataPtr> d_;
 
     // Settings
-    int num_envs = 1000;
-    int obs_dim = 10;
-    int action_dim = 10;
-    double max_sim_time_ = 10;
+    const int num_envs = 1000;
+    const int obs_dim = 10;
+    const int action_dim = 10;
+    const double max_sim_time_ = 10;
+    const double noise_min = -0.01;
+    const double noise_max = 0.01;
 
     int state_dim_;
 
@@ -43,4 +45,6 @@ private:
     void apply_actions_thread(int thread_id);
     void get_observations_thread(int thread_id);
     void run_physics_thread(int thread_id);
+
+    void add_noise(mjData* d);
 };

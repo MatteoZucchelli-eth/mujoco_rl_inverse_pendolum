@@ -1,4 +1,5 @@
 #include <mujoco_rl/sim.hpp>
+#include <cstdlib>  // for rand() and RAND_MAX
 
 Sim::Sim() {
     std::cout << "Hello world"  << std::endl;
@@ -73,7 +74,7 @@ void Sim::create_data() {
     envs_per_thread_ = (num_envs + n_cores_ - 1) / n_cores_;
 
     // Resize global buffers so accesses like &global_simstate_buffer[offset]
-    // are valid and we avoid out-of-bounds memory access.
+    // are valid and we avoid out-of-bounds memory access. This also initializes the vectors to be filled with 0.0
     global_observation_buffer.resize((size_t)num_envs * (size_t)obs_dim);
     global_action_buffer.resize((size_t)num_envs * (size_t)action_dim);
     global_simstate_buffer.resize((size_t)num_envs * (size_t)state_dim_);
@@ -174,6 +175,15 @@ void Sim::load_simstate(int env_id, mjData* d) {
     ptr += m_->nv;
 }
 
+void Sim::add_noise(mjData* d) {
+    
+    // Add noise to each position
+    for (int i = 0; i < m_->nq; i++) {
+        // Generate random number in [0, 1] and scale to [noise_min, noise_max]
+        double noise = noise_min + (static_cast<double>(rand()) / RAND_MAX) * (noise_max - noise_min);
+        d->qpos[i] += noise;
+    }
+}
 void Sim::step_parallel() {
     #pragma omp parallel
 
@@ -182,11 +192,14 @@ void Sim::step_parallel() {
         mjData* data = d_[thread_id].get(); // My private workbench
         mjModel* model = m_.get();
 
-    int start_index = thread_id * envs_per_thread_;
-    int end_index = start_index + envs_per_thread_;
+        int start_index = thread_id * envs_per_thread_;
+        int end_index = start_index + envs_per_thread_;
 
         // Loop thrugh the batch assigned to this thread
         for (int i = start_index; i < end_index; i++)  {
+            // stop if we exceed  the total number of environments. This can happen if num_envs is 
+            // not perfectly divisible by n_cores_
+            if (i >= num_envs) break;
             // load the state from the buffer
             load_simstate(i, data);
 
@@ -206,6 +219,8 @@ void Sim::step_parallel() {
                 mj_resetData(model, data);
 
                 // randomize a little bit the new start
+                add_noise(data);
+
                 mj_forward(model, data);
             }
 
@@ -228,3 +243,4 @@ void Sim::step_parallel() {
     }
 
 }
+

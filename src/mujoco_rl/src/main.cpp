@@ -7,5 +7,7 @@ int main() {
     Sim sim;
     sim.create_model("/workspaces/magic-triangle/src/model/scene.xml");
     sim.init();
+    sim.step_parallel();
+    
     return 0;
 }

@@ -1,0 +1,10 @@
+{
+    "url": "",
+    "output_format": "mujoco",
+    "package_name": "inverse_pendolum",
+    "robot_name": "inverse_pendolum",
+    "dynamics": {
+        "motor_effort": 10.0,
+        "friction": 0.1
+    }
+}

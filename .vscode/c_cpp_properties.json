@@ -7,7 +7,7 @@
       },
       "includePath": [
         "/opt/ros/humble/include/**",
-        "/workspaces/magic-triangle/src/mujoco_rl/include/**",
+        "/workspaces/inverse_pendolum_training/src/mujoco_rl/include/**",
         "/app/lib/mujoco/include/**",
         "/usr/include/**"
       ],

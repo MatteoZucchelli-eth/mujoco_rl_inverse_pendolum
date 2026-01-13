@@ -21,8 +21,8 @@ private:
 
     // Settings
     const int num_envs = 1000;
-    const int obs_dim = 10;
-    const int action_dim = 10;
+    const int obs_dim = 8;
+    const int action_dim = 1;
     const double max_sim_time_ = 10;
     const double noise_min = -0.01;
     const double noise_max = 0.01;
@@ -35,7 +35,7 @@ private:
     std::vector<float> global_observation_buffer;
     std::vector<float> global_action_buffer;
     std::vector<double> global_simstate_buffer;
-    std::vector<double> global_initial_state_buffer;  // Pristine initial states, never overwritten
+    std::vector<double> global_initial_state_buffer;
     std::vector<bool> global_done_buffer;
 
     void worker_thread(int thread_id, int envs_per_thread);

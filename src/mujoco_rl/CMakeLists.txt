@@ -27,7 +27,7 @@ target_link_libraries(mujoco_rl
 ament_target_dependencies(mujoco_rl)
 
 install (TARGETS mujoco_rl
-  DESTINATION lib/{PROJECT_NAME}
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_package()

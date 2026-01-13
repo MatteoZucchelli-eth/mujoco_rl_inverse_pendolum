@@ -1,0 +1,62 @@
+<?xml version="1.0" ?>
+<mujoco model="inverse_pendolum">
+  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+  <default>
+    <default class="inverse_pendolum">
+      <joint frictionloss="0.1" armature="0.005"/>
+      <position kp="1" dampratio="1"/>
+      <default class="visual">
+        <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+      </default>
+      <default class="collision">
+        <geom group="3"/>
+      </default>
+    </default>
+  </default>
+  <asset>
+    <mesh file="guide.stl"/>
+    <mesh file="base_part.stl"/>
+    <mesh file="pendolum.stl"/>
+    <!-- Materials -->
+    <material name="guide_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="base_part_material" rgba="0.615686 0.811765 0.929412 1"/>
+    <material name="pendolum_material" rgba="0.615686 0.811765 0.929412 1"/>
+  </asset>
+  
+  <worldbody>
+     <!-- Guide Link (Fixed to world) -->
+     <body name="guide" pos="0 0 0" childclass="inverse_pendolum">
+        <!-- Inertial from URDF -->
+        <inertial pos="-2.05911e-16 -0.00747284 0.0296992" mass="390.542" fullinertia="6.42026 269.45 266.933 -2.09683e-15 2.78238e-15 -0.955427"/>
+        
+        <geom type="mesh" class="visual" mesh="guide" material="guide_material" pos="-1.94289e-16 0 0.05"/>
+        <geom type="mesh" class="collision" mesh="guide" pos="-1.94289e-16 0 0.05"/>
+
+        <!-- Base Link -->
+        <!-- Joint origin from URDF: xyz="-6.93889e-18 0 0.075" -->
+        <body name="base" pos="-6.93889e-18 0 0.075">
+            <joint name="base_x_joint" type="slide" axis="1 0 0" range="-1.25 1.25" damping="0" frictionloss="0"/>
+            <inertial pos="0 0 0" mass="1.0" diaginertia="0.01 0.01 0.01"/>
+            
+            <geom type="mesh" class="visual" mesh="base_part" material="base_part_material"/>
+            <geom type="mesh" class="collision" mesh="base_part"/>
+
+            <!-- Pendulum Link -->
+            <!-- Joint origin from URDF: xyz="0 -0.1 0.125" -->
+            <body name="pendolum" pos="0 -0.1 0.125">
+                 <joint name="pendulum_y_joint" type="hinge" axis="0 -1 0"/>
+                 <!-- Shifted Center of Mass to make it a pendulum (matches visual horizontal alignment) -->
+                 <inertial pos="1.0 0 0" mass="1.0" diaginertia="0.01 0.01 0.01"/>
+                 
+                 <geom type="mesh" class="visual" mesh="pendolum" material="pendolum_material" euler="-3.14159 1.570796 -3.14159"/>
+                 <geom type="mesh" class="collision" mesh="pendolum" euler="-3.14159 1.570796 -3.14159" contype="0" conaffinity="0"/>
+            </body>
+        </body>
+     </body>
+  </worldbody>
+  
+  <actuator>
+     <!-- Changed to motor for force control on the cart (base), typical for CartPole -->
+     <motor name="base_actuator" joint="base_x_joint" gear="100" ctrlrange="-100 100" ctrllimited="true"/>
+  </actuator>
+</mujoco>

@@ -63,6 +63,13 @@ void Sim::create_data() {
         throw std::runtime_error("state_dim_ is not set or invalid. Ensure create_model() ran successfully.");
     }
 
+    if (m_->nq < obs_dim) {
+        throw std::runtime_error("Model nq (" + std::to_string(m_->nq) + ") is smaller than obs_dim (" + std::to_string(obs_dim) + ")");
+    }
+    if (m_->nu < action_dim) {
+        throw std::runtime_error("Model nu (" + std::to_string(m_->nu) + ") is smaller than action_dim (" + std::to_string(action_dim) + ")");
+    }
+
     n_cores_ = omp_get_num_procs();
     omp_set_dynamic(0);
     omp_set_num_threads(n_cores_);
@@ -307,22 +314,12 @@ void Sim::step_parallel() {
             mj_step(model, data);
 
             // Check if episode is done
-            bool done = (data->time > max_sim_time_); // for now let's just check this. Eventually we can also add here with a or a terminal  condition given by the user
-
-            // IMPORTANT: Save observation BEFORE reset (this is the terminal observation if done)
-            // This follows proper RL convention where the returned observation corresponds to the done flag
-            int obs_offset = i * obs_dim;
-            for (int k = 0; k < obs_dim; k++) {
-                global_observation_buffer[obs_offset + k] = data->qpos[k];
-            }
+            bool done = (data->time > max_sim_time_); 
 
             // Save the done flag
-            global_done_buffer[i] = done;
-            
-            // Save the current state (terminal state if done, regular state otherwise)
-            save_simstate(i, data);
+            global_done_buffer[i] = done; 
 
-            // NOW handle reset if needed
+            // Handle Reset or Continue
             if (done) {
                 // Load the pristine initial state
                 load_initial_state(i, data);
@@ -332,10 +329,15 @@ void Sim::step_parallel() {
 
                 // Forward kinematics to ensure consistency
                 mj_forward(model, data);
-                
-                // Save this new starting state to the current state buffer
-                // so the next iteration starts from this randomized initial state
-                save_simstate(i, data);
+            }
+
+            // Save the current state (new initial state if reset, regular state otherwise)
+            save_simstate(i, data);
+
+            // Update observation buffer (next observation so the agent can act)
+            int obs_offset = i * obs_dim;
+            for (int k = 0; k < obs_dim; k++) {
+                global_observation_buffer[obs_offset + k] = data->qpos[k];
             }
         }
     }

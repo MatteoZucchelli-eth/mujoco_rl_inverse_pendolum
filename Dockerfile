@@ -22,10 +22,18 @@ RUN apt-get update && apt-get install -y \
     libosmesa6-dev \
     patchelf \
     ninja-build \
+    wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
 RUN pip install --no-cache-dir numpy
+
+# Install c++ PyTorch
+RUN cd /tmp && \
+    wget https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-2.5.1%2Bcpu.zip -O libtorch.zip && \
+    unzip libtorch.zip -d /app/lib && \
+    rm libtorch.zip
 
 # Build mujoco library
 RUN cd /tmp && \
@@ -46,7 +54,8 @@ RUN cd /tmp && \
 # Setup bashrc to source ROS2 and workspace automatically
 RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
     echo "source /app/install/setup.bash" >> ~/.bashrc && \
-    echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc
+    echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc && \
+    echo 'export LD_LIBRARY_PATH=/app/lib/libtorch/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
 # Copy naro_msgs package files
 COPY src/ /app/src/

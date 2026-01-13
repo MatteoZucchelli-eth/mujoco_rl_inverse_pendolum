@@ -8,8 +8,9 @@
       "includePath": [
         "/opt/ros/humble/include/**",
         "/workspaces/inverse_pendolum_training/src/mujoco_rl/include/**",
+        "/workspaces/inverse_pendolum_training/src/rl_controller/include/**",
         "/app/lib/mujoco/include/**",
-        "/usr/include/**"
+        "/usr/include/**",
       ],
       "name": "ROS",
       "intelliSenseMode": "gcc-x64",

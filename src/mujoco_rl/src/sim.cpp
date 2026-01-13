@@ -290,7 +290,7 @@ void Sim::step_parallel() {
 
     {
         int thread_id = omp_get_thread_num();
-        mjData* data = d_[thread_id].get(); // My private workbench
+        mjData* data = d_[thread_id].get();
         mjModel* model = m_.get();
 
         int start_index = thread_id * envs_per_thread_;

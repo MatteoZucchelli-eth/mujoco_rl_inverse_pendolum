@@ -7,7 +7,9 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+list(APPEND CMAKE_PREFIX_PATH "/app/lib/libtorch")
 find_package(OpenMP REQUIRED)
+find_package(rl_controller REQUIRED)
 
 # Set MuJoCo paths
 set(MUJOCO_DIR /app/lib/mujoco)
@@ -24,7 +26,7 @@ target_link_libraries(mujoco_rl
   OpenMP::OpenMP_CXX
 )
 
-ament_target_dependencies(mujoco_rl)
+ament_target_dependencies(mujoco_rl rl_controller)
 
 install (TARGETS mujoco_rl
   DESTINATION lib/${PROJECT_NAME}

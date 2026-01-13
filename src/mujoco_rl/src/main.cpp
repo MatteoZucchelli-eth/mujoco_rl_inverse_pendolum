@@ -1,5 +1,6 @@
 #include <iostream>
 #include <mujoco_rl/sim.hpp>
+#include <rl_controller/controller.hpp>
 
 int main(int argc, char** argv) {
     std::cout << "Creating the Sim" << std::endl;
@@ -12,8 +13,9 @@ int main(int argc, char** argv) {
     Sim sim;
     sim.create_model(model_path.c_str());
     sim.init();
+    // rl::rlController controller(obs buffer from simulation basically so that it knows where to modify it. Think about a proper pipe line to let the controller know where to modify stuff);
 
-    while (i < 10000) {
+    while (i < 10) {
         sim.step_parallel();
         i++;
     }

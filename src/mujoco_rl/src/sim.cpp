@@ -194,17 +194,19 @@ void Sim::add_noise(mjData* d) {
 }
 void Sim::step_parallel(int step_idx) {
     #pragma omp parallel
-
     {
         int thread_id = omp_get_thread_num();
-        mjData* data = d_[thread_id].get();
-        mjModel* model = m_.get();
-        
-        int start_index = thread_id * envs_per_thread_;
-        int end_index = start_index + envs_per_thread_;
+        if (thread_id >= n_cores_) {
+            // Safety check
+        } else {
+            mjData* data = d_[thread_id].get();
+            mjModel* model = m_.get();
+            
+            int start_index = thread_id * envs_per_thread_;
+            int end_index = start_index + envs_per_thread_;
 
-        // Loop thrugh the batch assigned to this thread
-        for (int i = start_index; i < end_index; i++)  {
+            // Loop thrugh the batch assigned to this thread
+            for (int i = start_index; i < end_index; i++)  {
             // stop if we exceed  the total number of environments
             if (i >= num_envs) break;
             
@@ -265,6 +267,7 @@ void Sim::step_parallel(int step_idx) {
                 global_observation_buffer[obs_offset + qpos_limit + k] = (float)data->qvel[k];
             }
         }
+        }
     }
 }
 
@@ -309,7 +312,10 @@ void Sim::run(int steps) {
         #pragma omp parallel
         {
             int thread_id = omp_get_thread_num();
-            controller_->computeActions(thread_id);
+            // Ensure thread_id is within bounds, just in case
+            if (thread_id < n_cores_) {
+                 controller_->computeActions(thread_id);
+            }
         }
 
         // Parallel physics step and store data

@@ -22,6 +22,9 @@ int main() {
     // from a configuration file
     sim.init();   
 
+    // Set Torch to single-threaded execution for interference to avoid OpenMP conflicts
+    torch::set_num_threads(1);
+
     // Setup controller with access to all Sim buffers
     int num_envs = 1000; // Matches Sim default
     int n_cores = omp_get_num_procs();

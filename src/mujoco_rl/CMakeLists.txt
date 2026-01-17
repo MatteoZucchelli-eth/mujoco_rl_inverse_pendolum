@@ -1,35 +1,14 @@
-cmake_minimum_required(VERSION 3.8)
-project(mujoco_rl)
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-# find dependencies
-find_package(ament_cmake REQUIRED)
-list(APPEND CMAKE_PREFIX_PATH "/app/lib/libtorch")
-find_package(OpenMP REQUIRED)
-find_package(rl_controller REQUIRED)
-
-# Set MuJoCo paths
-set(MUJOCO_DIR /app/lib/mujoco)
-include_directories(include ${MUJOCO_DIR}/include)
-link_directories(${MUJOCO_DIR}/lib)
-
-add_executable(mujoco_rl
-  src/main.cpp
-  src/sim.cpp
+add_executable(mujoco_rl 
+    src/main.cpp 
+    src/sim.cpp
 )
 
-target_link_libraries(mujoco_rl
-  mujoco
-  OpenMP::OpenMP_CXX
+target_include_directories(mujoco_rl PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-ament_target_dependencies(mujoco_rl rl_controller)
-
-install (TARGETS mujoco_rl
-  DESTINATION lib/${PROJECT_NAME}
+target_link_libraries(mujoco_rl PRIVATE
+    rl_controller
+    mujoco
+    OpenMP::OpenMP_CXX
 )
-
-ament_package()

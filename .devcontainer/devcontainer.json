@@ -12,11 +12,12 @@
     "customizations": {
         "vscode": {
             "extensions": [
-                "ms-iot.vscode-ros",
                 "ms-vscode.vscode-json",
-                "ms-python.python"
+                "ms-python.python",
+                "twxs.cmake",
+                "ms-vscode.cpptools"
             ]
         }
     },
-    "postCreateCommand": "colcon build"
+    "postCreateCommand": "mkdir -p build && cd build && cmake .. && make -j$(nproc)"
 }

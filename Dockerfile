@@ -1,5 +1,8 @@
-# Use ROS2 Humble base image (or change to your ROS2 version)
-FROM ros:humble-ros-base
+# Use Ubuntu 22.04 base image
+FROM ubuntu:22.04
+
+# Avoid interactive prompts during apt install
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Set working directory in container
 WORKDIR /app
@@ -10,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     cmake \
     git \
     python3-pip \
-    python3-colcon-common-extensions \
     libgl1-mesa-dev \
     libx11-dev \
     libxrandr-dev \
@@ -25,9 +27,6 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Python packages
-RUN pip install --no-cache-dir numpy
 
 # Install c++ PyTorch
 RUN cd /tmp && \
@@ -51,12 +50,11 @@ RUN cd /tmp && \
     cd / && \
     rm -rf /tmp/mujoco
 
-# Setup bashrc to source ROS2 and workspace automatically
-RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
-    echo "source /app/install/setup.bash" >> ~/.bashrc && \
-    echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc && \
+# Setup bashrc to source workspace automatically
+RUN echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc && \
     echo 'export LD_LIBRARY_PATH=/app/lib/libtorch/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
-# Copy naro_msgs package files
+# Copy source files (optional for devcontainer as it mounts volume, but good for standalone build)
+COPY CMakeLists.txt /app/CMakeLists.txt
 COPY src/ /app/src/
 

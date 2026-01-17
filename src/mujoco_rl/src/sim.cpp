@@ -313,6 +313,15 @@ void Sim::run(int steps) {
     // Compute rewards to go (returns) after collecting all steps
     compute_returns(steps);
     compute_advantages(steps);
+
+    // Calculate and log mean reward
+    double total_reward = 0.0;
+    #pragma omp parallel for reduction(+:total_reward)
+    for (size_t i = 0; i < rollout_rewards.size(); ++i) {
+        total_reward += (double)rollout_rewards[i];
+    }
+    double mean_reward = total_reward / (double)rollout_rewards.size();
+    std::cout << "Mean Batch Reward: " << mean_reward << std::endl;
     
     // Train Policy and Value Function
     train();

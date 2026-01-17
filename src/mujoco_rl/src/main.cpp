@@ -42,7 +42,7 @@ int main() {
     sim.set_controller(controller);
 
     // Run training loop
-    int num_iterations = 25;
+    int num_iterations = 100;
     int steps_per_iteration = 1000;
 
     for (int i = 0; i < num_iterations; ++i) {

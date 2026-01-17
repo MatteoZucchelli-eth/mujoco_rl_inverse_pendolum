@@ -18,7 +18,7 @@ namespace rl {
         
         // Initialize optimizer
         critique_optimizer_ = std::make_unique<torch::optim::Adam>(critique_->parameters(), torch::optim::AdamOptions(1e-3));
-        actor_optimizer_ = std::make_unique<torch::optim::Adam>(actor_->parameters(), torch::optim::AdamOptions(3e-4));
+        actor_optimizer_ = std::make_unique<torch::optim::Adam>(actor_->parameters(), torch::optim::AdamOptions(1e-3));
     }
 
     void Controller::updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
@@ -39,7 +39,7 @@ namespace rl {
 
         // Hyperparameters
         int epochs = 10;
-        int batch_size = 64;
+        int batch_size = 256;
         float clip_param = 0.2;
 
         actor_->train();

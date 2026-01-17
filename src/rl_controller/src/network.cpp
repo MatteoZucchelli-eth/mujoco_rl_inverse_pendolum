@@ -6,9 +6,9 @@ namespace rl {
         torch::nn::Sequential model;
         // Input: obs_dim, Output: action_dim
         model->push_back(torch::nn::Linear(obs_dim, 64));
-        model->push_back(torch::nn::Tanh());
+        model->push_back(torch::nn::ReLU());
         model->push_back(torch::nn::Linear(64, 32));
-        model->push_back(torch::nn::Tanh());
+        model->push_back(torch::nn::ReLU());
         // Output mean and log_std (2 * action_dim)
         model->push_back(torch::nn::Linear(32, 2 * action_dim));
         return model;

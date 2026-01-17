@@ -230,10 +230,20 @@ void Sim::step_parallel(int step_idx) {
             mj_step(model, data);
 
             // Compute reward
-            global_reward_buffer[i] = (float)compute_reward(data);
+            double reward = compute_reward(data);
 
             // Check if episode is done
             bool done = (data->time > max_sim_time_); 
+            
+            // Limit Base Position
+            if (model->nq >= 1) {
+                if (std::abs(data->qpos[0]) > 1.25) {
+                    done = true;
+                    reward -= 1000.0; // Terminal penalty
+                }
+            }
+
+            global_reward_buffer[i] = (float)reward;
             global_done_buffer[i] = done; 
 
             // Save transition to rollout buffer (obs_t, act_t, rew_t, val_t, log_prob_t)
@@ -359,36 +369,48 @@ void Sim::train() {
     controller_->updatePolicy(rollout_observations, rollout_actions, rollout_log_probs, rollout_returns, rollout_advantages);
 }
 
-// Reward based on angle (upright = 0) and angular velocity
+// Reward based on angle (target = pi/2) and angular velocity
 double Sim::compute_reward(const mjData* d) {
-    // Assuming inverted pendulum where qpos[1] is angle (or qpos[0] if single joint)
-    // The goal is to be upright.
-    // Let's assume standard gym inverted pendulum:
-    // angle is qpos[1] (if qpos[0] is slides) or just qpos[0] depending on model.
-    // For simplicity, let's assume index 0 for now as generic, but should be checked with model.
-    // Typically reward = 1.0 (for staying alive) or -(theta^2 + 0.1*theta_dot^2)
-    
-    // Simple placeholder reward: -(angle^2 + 0.1 * velocity^2)
-    // We assume qpos[0] is the angle the pole makes with vertical?
-    // Or maybe cartpole? If it's pure inverted pendulum:
-    double angle = d->qpos[1]; // Typically index 1 is hinge if index 0 is slider.
-    // Let's check model dim. For InvertedPendulum-v4 (gym), qpos has 2 elements (slider, hinge).
-    // Accessing qpos[1] safely requires checking model structure, but for now assuming it exists.
-    double vel = d->qvel[1];
+    double base_pos = 0.0;
+    double angle = 0.0;
+    double vel_angle = 0.0;
 
-    // Check bounds
-    if (m_->nq < 2) {
-        // Fallback for simple pendulum
+    // Check bounds and assign variables
+    if (m_->nq >= 2) {
+        base_pos = d->qpos[0];
+        angle = d->qpos[1];
+        vel_angle = d->qvel[1]; // Velocity of the joint
+    } else {
+        // Fallback or single joint
         angle = d->qpos[0];
-        vel = d->qvel[0];
+        vel_angle = d->qvel[0];
     }
-    double target_angle = M_PI_2; 
     
-    double angle_error = angle - target_angle;
-    // Reward for keeping pole upright (angle close to pi/2)
-    // small angle approximation or cos(angle)
-    // Here using simple quadratic cost
-    return -(angle_error * angle_error + 0.1 * vel * vel) + 1.0; 
+    // Target Upright (Pi/2) - User specified 0 is horizontal
+    double target = M_PI_2;  // M_PI / 2
+    double diff = angle - target;
+    
+    double reward = 0.0;
+    
+    // 1. Term to maintain upright posture
+    reward += -(diff * diff);
+
+    // 2. Term to minimize velocity
+    reward += -0.1 * (vel_angle * vel_angle);
+    
+    // 3. Term to not reach the end of the base (Shaping)
+    reward += -0.1 * (base_pos * base_pos);
+
+    // 4. Penalize if under horizontal line (sin(angle) < 0)
+    // Assuming 0 and Pi are horizontal
+    if (std::sin(angle) < 0) {
+        reward -= 10.0; 
+    }
+
+    // Alive bonus
+    reward += 1.0;
+
+    return reward; 
 }
 
 void Sim::store_rollout_step(int step_idx, int env_id) {

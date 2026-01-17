@@ -31,7 +31,7 @@ namespace rl {
             float *global_log_prob_buffer_ptr_;
             float *global_value_buffer_ptr_;
 
-            const int obs_dim = 8;
+            const int obs_dim = 4;
             const int action_dim = 1;
             
             int num_envs_;

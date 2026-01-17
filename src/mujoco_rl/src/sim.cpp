@@ -66,8 +66,10 @@ void Sim::create_data() {
         throw std::runtime_error("state_dim_ is not set or invalid. Ensure create_model() ran successfully.");
     }
 
-    if (m_->nq < obs_dim) {
-        throw std::runtime_error("Model nq (" + std::to_string(m_->nq) + ") is smaller than obs_dim (" + std::to_string(obs_dim) + ")");
+    // Check if the model has enough dimensions for our observation definition (qpos + qvel)
+    if (m_->nq + m_->nv < obs_dim) {
+        throw std::runtime_error("Model state (nq=" + std::to_string(m_->nq) + ", nv=" + std::to_string(m_->nv) 
+            + ") is smaller than obs_dim (" + std::to_string(obs_dim) + ")");
     }
     if (m_->nu < action_dim) {
         throw std::runtime_error("Model nu (" + std::to_string(m_->nu) + ") is smaller than action_dim (" + std::to_string(action_dim) + ")");
@@ -244,10 +246,23 @@ void Sim::step_parallel(int step_idx) {
             save_state_to_buffer(i, data, global_simstate_buffer);
 
             // Update observation buffer (next observation so the agent can act)
-            // Also here a method might be needed
+            // Obs = [qpos, qvel]
             int obs_offset = i * obs_dim;
-            for (int k = 0; k < obs_dim; k++) {
-                global_observation_buffer[obs_offset + k] = data->qpos[k];
+            
+            // Check bounds to be safe, though create_data validted nq+nv >= obs_dim
+            int qpos_limit = std::min(model->nq, obs_dim);
+            
+            // Copy qpos
+            for (int k = 0; k < qpos_limit; k++) {
+                global_observation_buffer[obs_offset + k] = (float)data->qpos[k];
+            }
+            
+            // Copy qvel. We continue filling the buffer from where qpos left off.
+            // Ensure we don't overflow obs_dim even if model has more states than we need.
+            int qvel_limit = std::min(model->nv, obs_dim - qpos_limit);
+            
+            for (int k = 0; k < qvel_limit; k++) {
+                global_observation_buffer[obs_offset + qpos_limit + k] = (float)data->qvel[k];
             }
         }
     }

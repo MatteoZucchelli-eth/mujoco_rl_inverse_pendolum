@@ -42,7 +42,7 @@ private:
 
     // Settings
     const int num_envs = 1000;
-    const int obs_dim = 8;
+    const int obs_dim = 4; // qpos (2) + qvel (2)
     const int action_dim = 1;
     const double max_sim_time_ = 10;
     const double noise_min = -0.01;

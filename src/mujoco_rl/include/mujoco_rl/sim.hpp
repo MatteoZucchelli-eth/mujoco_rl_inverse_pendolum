@@ -47,6 +47,7 @@ private:
     const double max_sim_time_ = 10;
     const double noise_min = -0.01;
     const double noise_max = 0.01;
+    const double gamma = 0.9;
 
     int state_dim_;
 
@@ -66,6 +67,8 @@ private:
     std::vector<float> rollout_log_probs;
     std::vector<float> rollout_values;
     std::vector<float> rollout_rewards;
+    std::vector<float> rollout_returns; // Store returns (rewards to go)
+    std::vector<float> rollout_advantages;
     std::vector<bool> rollout_dones;
 
     std::vector<double> global_simstate_buffer;
@@ -89,7 +92,8 @@ private:
     void add_noise(mjData* d);
     double compute_reward(const mjData* d);
     void store_rollout_step(int step_idx, int env_id);
-    void step_parallel(int step_idx);
+    void step_parallel(int step_idx);    
+    void compute_returns(int steps);
+    void compute_advantages(int steps);
 };
-
 }

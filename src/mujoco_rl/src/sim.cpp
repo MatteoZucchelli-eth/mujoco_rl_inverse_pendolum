@@ -285,7 +285,8 @@ void Sim::run(int steps) {
     rollout_actions.resize((size_t)steps * (size_t)num_envs * (size_t)action_dim);
     rollout_log_probs.resize((size_t)steps * (size_t)num_envs);
     rollout_values.resize((size_t)steps * (size_t)num_envs);
-    rollout_rewards.resize((size_t)steps * (size_t)num_envs);
+    rollout_returns.resize((size_t)steps * (size_t)num_envs);
+    rollout_advantages.resize((size_t)steps * (size_t)num_envs);
     rollout_dones.resize((size_t)steps * (size_t)num_envs);
 
     for (int s = 0; s < steps; ++s) {
@@ -299,7 +300,10 @@ void Sim::run(int steps) {
         // Parallel physics step and store data
         // We pass the current step index 's' to store data in the correct slot of rollout buffers
         step_parallel(s);
-    }
+    }    
+    // Compute rewards to go (returns) after collecting all steps
+    compute_returns(steps);
+    compute_advantages(steps);
 }
 
 // Reward based on angle (upright = 0) and angular velocity
@@ -353,6 +357,45 @@ void Sim::store_rollout_step(int step_idx, int env_id) {
     vec_env_offset = env_offset * action_dim;
     for (int k = 0; k < action_dim; ++k) {
         rollout_actions[vec_step_offset + vec_env_offset + k] = global_action_buffer[vec_env_offset + k];
+    }
+}
+
+void Sim::compute_returns(int steps) {
+    rollout_returns.resize(rollout_rewards.size());
+
+    // Compute GAE or just returns separately for each environment
+    #pragma omp parallel for
+    for (int env_id = 0; env_id < num_envs; ++env_id) {
+        float gae = 0.0;
+        float next_value = 0.0; // Value of terminal state is 0
+        
+        // Iterate backwards from last step to 0
+        for (int t = steps - 1; t >= 0; --t) {
+            size_t idx = (size_t)t * num_envs + env_id;
+            
+            // Allow for non-terminal returns calculation
+            // If rollout_dones[idx] is true, next value is 0
+            // Otherwise it's the discounted return from t+1
+            
+            float reward = rollout_rewards[idx];
+            bool done = rollout_dones[idx];
+            
+            // Standard Rewards-to-Go (Monte Carlo Returns)
+            if (done) {
+                next_value = 0.0;
+            }
+            
+            next_value = reward + gamma * next_value;
+            rollout_returns[idx] = next_value;
+        }
+    }
+}
+
+void Sim::compute_advantages(int steps) {
+    // Advantage = Returns - Value
+    #pragma omp parallel for
+    for (size_t i = 0; i < rollout_returns.size(); ++i) {
+        rollout_advantages[i] = rollout_returns[i] - rollout_values[i];
     }
 }
 }

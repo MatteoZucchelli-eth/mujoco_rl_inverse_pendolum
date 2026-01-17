@@ -1,5 +1,4 @@
 #include <mujoco_rl/sim.hpp>
-#include <cstdlib>  // for rand() and RAND_MAX
 
 namespace mj_pool {
 
@@ -91,6 +90,10 @@ void Sim::create_data() {
     // are valid and we avoid out-of-bounds memory access. This also initializes the vectors to be filled with 0.0
     global_observation_buffer.resize((size_t)num_envs * (size_t)obs_dim);
     global_action_buffer.resize((size_t)num_envs * (size_t)action_dim);
+    global_log_prob_buffer.resize((size_t)num_envs); // 1 per env
+    global_value_buffer.resize((size_t)num_envs);    // 1 per env
+    global_reward_buffer.resize((size_t)num_envs);   // 1 per env
+
     global_simstate_buffer.resize((size_t)num_envs * (size_t)state_dim_);
     global_initial_state_buffer.resize((size_t)num_envs * (size_t)state_dim_);  // Separate buffer for pristine initial states
     global_done_buffer.resize((size_t)num_envs);
@@ -187,22 +190,22 @@ void Sim::add_noise(mjData* d) {
         d->qpos[i] += noise;
     }
 }
-void Sim::step_parallel() {
+void Sim::step_parallel(int step_idx) {
     #pragma omp parallel
 
     {
         int thread_id = omp_get_thread_num();
         mjData* data = d_[thread_id].get();
         mjModel* model = m_.get();
-
+        
         int start_index = thread_id * envs_per_thread_;
         int end_index = start_index + envs_per_thread_;
 
         // Loop thrugh the batch assigned to this thread
         for (int i = start_index; i < end_index; i++)  {
-            // stop if we exceed  the total number of environments. This can happen if num_envs is 
-            // not perfectly divisible by n_cores_
+            // stop if we exceed  the total number of environments
             if (i >= num_envs) break;
+            
             // load the state from the buffer
             load_state_from_buffer(i, data, global_simstate_buffer);
 
@@ -215,12 +218,15 @@ void Sim::step_parallel() {
             // step physics
             mj_step(model, data);
 
-            // Check if episode is done
-            // Add here a check_done method
-            bool done = (data->time > max_sim_time_); 
+            // Compute reward
+            global_reward_buffer[i] = (float)compute_reward(data);
 
-            // Save the done flag
+            // Check if episode is done
+            bool done = (data->time > max_sim_time_); 
             global_done_buffer[i] = done; 
+
+            // Save transition to rollout buffer (obs_t, act_t, rew_t, val_t, log_prob_t)
+            store_rollout_step(step_idx, i);
 
             // Handle Reset or Continue
             if (done) {
@@ -245,15 +251,108 @@ void Sim::step_parallel() {
             }
         }
     }
-
 }
 
-float* Sim::get_observation_buffer() {
-    return &global_observation_buffer[0];
+float* Sim::get_log_prob_buffer(int thread_id) {
+    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
+    return &global_log_prob_buffer[offset];
+}
+float* Sim::get_value_buffer(int thread_id) {
+    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
+    return &global_value_buffer[offset];
+}
+float* Sim::get_reward_buffer(int thread_id) {
+    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
+    return &global_reward_buffer[offset];
 }
 
-float* Sim::get_action_buffer() {
-    return &global_action_buffer[0];
+float* Sim::get_observation_buffer() { return &global_observation_buffer[0]; }
+float* Sim::get_action_buffer() { return &global_action_buffer[0]; }
+float* Sim::get_log_prob_buffer() { return &global_log_prob_buffer[0]; }
+float* Sim::get_value_buffer() { return &global_value_buffer[0]; }
+
+void Sim::set_controller(std::shared_ptr<rl::Controller> controller) {
+    controller_ = controller;
 }
 
+void Sim::run(int steps) {
+    if (!controller_) {
+        throw std::runtime_error("Controller not set. Call set_controller() before run().");
+    }
+
+    // Resize rollout buffers
+    rollout_observations.resize((size_t)steps * (size_t)num_envs * (size_t)obs_dim);
+    rollout_actions.resize((size_t)steps * (size_t)num_envs * (size_t)action_dim);
+    rollout_log_probs.resize((size_t)steps * (size_t)num_envs);
+    rollout_values.resize((size_t)steps * (size_t)num_envs);
+    rollout_rewards.resize((size_t)steps * (size_t)num_envs);
+    rollout_dones.resize((size_t)steps * (size_t)num_envs);
+
+    for (int s = 0; s < steps; ++s) {
+        // Parallel inference
+        #pragma omp parallel
+        {
+            int thread_id = omp_get_thread_num();
+            controller_->computeActions(thread_id);
+        }
+
+        // Parallel physics step and store data
+        // We pass the current step index 's' to store data in the correct slot of rollout buffers
+        step_parallel(s);
+    }
+}
+
+// Reward based on angle (upright = 0) and angular velocity
+double Sim::compute_reward(const mjData* d) {
+    // Assuming inverted pendulum where qpos[1] is angle (or qpos[0] if single joint)
+    // The goal is to be upright.
+    // Let's assume standard gym inverted pendulum:
+    // angle is qpos[1] (if qpos[0] is slides) or just qpos[0] depending on model.
+    // For simplicity, let's assume index 0 for now as generic, but should be checked with model.
+    // Typically reward = 1.0 (for staying alive) or -(theta^2 + 0.1*theta_dot^2)
+    
+    // Simple placeholder reward: -(angle^2 + 0.1 * velocity^2)
+    // We assume qpos[0] is the angle the pole makes with vertical?
+    // Or maybe cartpole? If it's pure inverted pendulum:
+    double angle = d->qpos[1]; // Typically index 1 is hinge if index 0 is slider.
+    // Let's check model dim. For InvertedPendulum-v4 (gym), qpos has 2 elements (slider, hinge).
+    // Accessing qpos[1] safely requires checking model structure, but for now assuming it exists.
+    double vel = d->qvel[1];
+
+    // Check bounds
+    if (m_->nq < 2) {
+        // Fallback for simple pendulum
+        angle = d->qpos[0];
+        vel = d->qvel[0];
+    }
+    
+    // Reward for keeping pole upright (angle close to 0)
+    // small angle approximation or cos(angle)
+    // Here using simple quadratic cost
+    return -(angle * angle + 0.1 * vel * vel) + 1.0; 
+}
+
+void Sim::store_rollout_step(int step_idx, int env_id) {
+    size_t env_offset = env_id;
+    size_t step_offset_base = (size_t)step_idx * num_envs;
+    
+    // Scalars
+    rollout_rewards[step_offset_base + env_offset] = global_reward_buffer[env_offset];
+    rollout_values[step_offset_base + env_offset] = global_value_buffer[env_offset];
+    rollout_log_probs[step_offset_base + env_offset] = global_log_prob_buffer[env_offset];
+    rollout_dones[step_offset_base + env_offset] = global_done_buffer[env_offset];
+
+    // Vectors
+    size_t vec_step_offset = step_offset_base * obs_dim;
+    size_t vec_env_offset = env_offset * obs_dim;
+    for (int k = 0; k < obs_dim; ++k) {
+        rollout_observations[vec_step_offset + vec_env_offset + k] = global_observation_buffer[vec_env_offset + k];
+    }
+
+    vec_step_offset = step_offset_base * action_dim;
+    vec_env_offset = env_offset * action_dim;
+    for (int k = 0; k < action_dim; ++k) {
+        rollout_actions[vec_step_offset + vec_env_offset + k] = global_action_buffer[vec_env_offset + k];
+    }
+}
 }

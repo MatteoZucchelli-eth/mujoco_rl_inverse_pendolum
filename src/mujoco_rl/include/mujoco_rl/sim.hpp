@@ -1,3 +1,5 @@
+#pragma once
+
 #include <mujoco/mujoco.h>
 #include <memory>
 #include <iostream>
@@ -6,6 +8,11 @@
 #include <vector>
 #include <omp.h>
 #include <mujoco_rl_utils/utils.hpp>
+#include <rl_controller/controller.hpp>
+#include <cstdlib>
+
+// Forward decl
+namespace rl { class Controller; }
 
 namespace mj_pool {
 
@@ -13,12 +20,21 @@ class Sim {
 public:
     Sim();
     void init();
-    void step_parallel();
     void create_model(const char* filename);
     void create_data();
+    void set_controller(std::shared_ptr<rl::Controller> controller);
+    void run(int steps);
 
+    float* get_observation_buffer(int thread_id);
+    float* get_action_buffer(int thread_id);
+    float* get_log_prob_buffer(int thread_id);
+    float* get_value_buffer(int thread_id);
+    float* get_reward_buffer(int thread_id);
+    
     float* get_observation_buffer();
     float* get_action_buffer();
+    float* get_log_prob_buffer();
+    float* get_value_buffer();
 
 private:
     MjModelPtr m_;
@@ -37,11 +53,26 @@ private:
     int n_cores_;
     int envs_per_thread_;
 
+    // Current Step Buffers
     std::vector<float> global_observation_buffer;
     std::vector<float> global_action_buffer;
+    std::vector<float> global_log_prob_buffer;
+    std::vector<float> global_value_buffer;
+    std::vector<float> global_reward_buffer;
+
+    // Rollout Buffers (History)
+    std::vector<float> rollout_observations;
+    std::vector<float> rollout_actions;
+    std::vector<float> rollout_log_probs;
+    std::vector<float> rollout_values;
+    std::vector<float> rollout_rewards;
+    std::vector<bool> rollout_dones;
+
     std::vector<double> global_simstate_buffer;
     std::vector<double> global_initial_state_buffer;
     std::vector<bool> global_done_buffer;
+
+    std::shared_ptr<rl::Controller> controller_;
 
     void worker_thread(int thread_id, int envs_per_thread);
 
@@ -56,6 +87,9 @@ private:
     void deserialize_state(mjData* d, const double* src);
 
     void add_noise(mjData* d);
+    double compute_reward(const mjData* d);
+    void store_rollout_step(int step_idx, int env_id);
+    void step_parallel(int step_idx);
 };
 
 }

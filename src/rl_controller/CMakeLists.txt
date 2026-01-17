@@ -11,7 +11,7 @@ list(APPEND CMAKE_PREFIX_PATH "/app/lib/libtorch")
 find_package(Torch REQUIRED) 
 
 # 2. Define the Library
-add_library(rl_controller src/controller.cpp)
+add_library(rl_controller src/controller.cpp src/network.cpp)
 
 # 3. Link Dependencies
 target_include_directories(rl_controller PUBLIC

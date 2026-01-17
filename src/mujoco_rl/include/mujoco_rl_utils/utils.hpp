@@ -1,3 +1,5 @@
+#pragma once
+
 #include <mujoco/mujoco.h>
 #include <memory>
 /*

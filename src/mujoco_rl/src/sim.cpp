@@ -31,6 +31,8 @@ void Sim::init() {
         // Also save to current state buffer so first step can begin
         save_state_to_buffer(i, d_[0].get(), global_simstate_buffer);
     }
+
+    std::cout << "Simulation initialization completed" << std::endl;
 }
 
 void Sim::create_model(const char* filename) {
@@ -199,6 +201,7 @@ void Sim::step_parallel(int step_idx) {
         if (thread_id >= n_cores_) {
             // Safety check
         } else {
+
             mjData* data = d_[thread_id].get();
             mjModel* model = m_.get();
             
@@ -231,7 +234,6 @@ void Sim::step_parallel(int step_idx) {
 
             // Save transition to rollout buffer (obs_t, act_t, rew_t, val_t, log_prob_t)
             store_rollout_step(step_idx, i);
-
             // Handle Reset or Continue
             if (done) {
                 // Load the pristine initial state
@@ -243,6 +245,8 @@ void Sim::step_parallel(int step_idx) {
                 // Forward kinematics to ensure consistency
                 mj_forward(model, data);
             }
+            std::cout << "I am here 2" << std::endl;
+
 
             // Save the current state (new initial state if reset, regular state otherwise)
             save_state_to_buffer(i, data, global_simstate_buffer);
@@ -303,6 +307,7 @@ void Sim::run(int steps) {
     rollout_actions.resize((size_t)steps * (size_t)num_envs * (size_t)action_dim);
     rollout_log_probs.resize((size_t)steps * (size_t)num_envs);
     rollout_values.resize((size_t)steps * (size_t)num_envs);
+    rollout_rewards.resize((size_t)steps * (size_t)num_envs);
     rollout_returns.resize((size_t)steps * (size_t)num_envs);
     rollout_advantages.resize((size_t)steps * (size_t)num_envs);
     rollout_dones.resize((size_t)steps * (size_t)num_envs);
@@ -385,12 +390,13 @@ double Sim::compute_reward(const mjData* d) {
 void Sim::store_rollout_step(int step_idx, int env_id) {
     size_t env_offset = env_id;
     size_t step_offset_base = (size_t)step_idx * num_envs;
-    
+
     // Scalars
     rollout_rewards[step_offset_base + env_offset] = global_reward_buffer[env_offset];
     rollout_values[step_offset_base + env_offset] = global_value_buffer[env_offset];
     rollout_log_probs[step_offset_base + env_offset] = global_log_prob_buffer[env_offset];
     rollout_dones[step_offset_base + env_offset] = global_done_buffer[env_offset];
+
 
     // Vectors
     size_t vec_step_offset = step_offset_base * obs_dim;

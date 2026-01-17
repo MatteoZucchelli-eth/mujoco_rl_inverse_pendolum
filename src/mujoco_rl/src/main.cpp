@@ -42,14 +42,14 @@ int main() {
     sim.set_controller(controller);
 
     // Run training loop
-    int num_iterations = 100;
-    int steps_per_iteration = 200;
+    int num_iterations = 25;
+    int steps_per_iteration = 1000;
 
     for (int i = 0; i < num_iterations; ++i) {
         std::cout << "Iteration " << i + 1 << "/" << num_iterations << " started..." << std::endl;
         sim.run(steps_per_iteration);
 
-        if ((i + 1) % 25 == 0) {
+        if ((i + 1) % 5 == 0) {
             controller->save(checkpoint_dir, i + 1);
         }
     }

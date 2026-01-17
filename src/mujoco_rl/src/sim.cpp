@@ -46,6 +46,10 @@ void Sim::create_model(const char* filename) {
     }
 
     m_ = MjModelPtr(m_raw);
+    
+    // Set simulation timestep to 0.01 seconds
+    m_->opt.timestep = 0.01;
+
     state_dim_ = 
     1 +                 // d->time
     m_->nq +            // d->qpos

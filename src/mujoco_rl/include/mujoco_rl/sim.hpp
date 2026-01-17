@@ -7,6 +7,8 @@
 #include <omp.h>
 #include <mujoco_rl_utils/utils.hpp>
 
+namespace mj_pool {
+
 class Sim {
 public:
     Sim();
@@ -14,6 +16,9 @@ public:
     void step_parallel();
     void create_model(const char* filename);
     void create_data();
+
+    float* get_observation_buffer();
+    float* get_action_buffer();
 
 private:
     MjModelPtr m_;
@@ -40,14 +45,17 @@ private:
 
     void worker_thread(int thread_id, int envs_per_thread);
 
-    void save_simstate(int env_id, mjData* d);
-    void load_simstate(int env_id, mjData* d);
-    void save_initial_state(int env_id, mjData* d);
-    void load_initial_state(int env_id, mjData* d);
-
     void apply_actions_thread(int thread_id);
     void get_observations_thread(int thread_id);
     void run_physics_thread(int thread_id);
 
+    void load_state_from_buffer(int env_id, mjData* d, const std::vector<double>& buffer);
+    void save_state_to_buffer(int env_id, mjData* d, std::vector<double>& buffer);
+
+    void serialize_state(const mjData* d, double* dst);
+    void deserialize_state(mjData* d, const double* src);
+
     void add_noise(mjData* d);
 };
+
+}

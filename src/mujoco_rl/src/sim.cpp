@@ -1,6 +1,8 @@
 #include <mujoco_rl/sim.hpp>
 #include <cstdlib>  // for rand() and RAND_MAX
 
+namespace mj_pool {
+
 Sim::Sim() {
     std::cout << "Hello world"  << std::endl;
 }
@@ -25,10 +27,10 @@ void Sim::init() {
         // Optional: Apply initial randomization here
         
         // Save this pristine initial state (never overwritten)
-        save_initial_state(i, d_[0].get());
+        save_state_to_buffer(i, d_[0].get(), global_initial_state_buffer);
         
         // Also save to current state buffer so first step can begin
-        save_simstate(i, d_[0].get());
+        save_state_to_buffer(i, d_[0].get(), global_simstate_buffer);
     }
 }
 
@@ -52,6 +54,8 @@ void Sim::create_model(const char* filename) {
     (4 * m_->nmocap) +  // d->mocap_quat
     m_->nuserdata +     // d->userdata
     m_->nv;             // d->qacc_warmstart
+
+    std::cout << "Model created with state dimension: " << state_dim_ << std::endl;
 }
 
 void Sim::create_data() {
@@ -96,184 +100,82 @@ void Sim::create_data() {
     
 }
 
-// This function saves the state for a specific element of a batch
-void Sim::save_simstate(int env_id, mjData* d) {
-    int offset = env_id * state_dim_;
-    double* dst = &global_simstate_buffer[offset];
-
+void Sim::serialize_state(const mjData* d, double* dst) {
     double* ptr = dst;
 
-    // 1. Time (1)
-    *ptr = d->time; 
-    ptr++;
+    // 1. Time
+    *ptr = d->time; ptr++;
 
-    // 2. QPOS (nq)
-    mju_copy(ptr, d->qpos, m_->nq); 
-    ptr += m_->nq;
+    // 2. QPOS
+    mju_copy(ptr, d->qpos, m_->nq); ptr += m_->nq;
 
-    // 3. QVEL (nv)
-    mju_copy(ptr, d->qvel, m_->nv); 
-    ptr += m_->nv;
+    // 3. QVEL
+    mju_copy(ptr, d->qvel, m_->nv); ptr += m_->nv;
 
-    // 4. ACT (na) - Only if model has actuators/muscles
+    // 4. ACT
     if (m_->na > 0) {
-        mju_copy(ptr, d->act, m_->na); 
-        ptr += m_->na;
+        mju_copy(ptr, d->act, m_->na); ptr += m_->na;
     }
     
-    // 5. MOCAP (if any)
+    // 5. MOCAP
     if (m_->nmocap > 0) {
-        mju_copy(ptr, d->mocap_pos, 3 * m_->nmocap); 
-        ptr += 3 * m_->nmocap;
-
-        mju_copy(ptr, d->mocap_quat, 4 * m_->nmocap); 
-        ptr += 4 * m_->nmocap;
+        mju_copy(ptr, d->mocap_pos, 3 * m_->nmocap); ptr += 3 * m_->nmocap;
+        mju_copy(ptr, d->mocap_quat, 4 * m_->nmocap); ptr += 4 * m_->nmocap;
     }
 
     // 6. User Data
     if (m_->nuserdata > 0) {
-        mju_copy(ptr, d->userdata, m_->nuserdata); 
-        ptr += m_->nuserdata;
+        mju_copy(ptr, d->userdata, m_->nuserdata); ptr += m_->nuserdata;
     }
 
-    // 7. Warm Start (Crucial for speed!)
-    mju_copy(ptr, d->qacc_warmstart, m_->nv); 
-    ptr += m_->nv;
+    // 7. Warm Start
+    mju_copy(ptr, d->qacc_warmstart, m_->nv); ptr += m_->nv;
 }
 
-// This function loads the state for a specific element of a batch
-void Sim::load_simstate(int env_id, mjData* d) {
-    int offset = env_id * state_dim_;
-    double* src = &global_simstate_buffer[offset];
+// PRIVATE HELPER: Reads raw memory and puts it into mjData
+void Sim::deserialize_state(mjData* d, const double* src) {
+    const double* ptr = src;
 
-    double* ptr = src;
+    // 1. Time
+    d->time = *ptr; ptr++;
 
-    // 1. Time (1)
-    d->time = *ptr; 
-    ptr++;
+    // 2. QPOS
+    mju_copy(d->qpos, ptr, m_->nq); ptr += m_->nq;
 
-    // 2. QPOS (nq)
-    mju_copy(d->qpos, ptr, m_->nq); 
-    ptr += m_->nq;
+    // 3. QVEL
+    mju_copy(d->qvel, ptr, m_->nv); ptr += m_->nv;
 
-    // 3. QVEL (nv)
-    mju_copy(d->qvel, ptr, m_->nv); 
-    ptr += m_->nv;
-
-    // 4. ACT (na) - Only if model has actuators/muscles
+    // 4. ACT
     if (m_->na > 0) {
-        mju_copy(d->act, ptr, m_->na); 
-        ptr += m_->na;
+        mju_copy(d->act, ptr, m_->na); ptr += m_->na;
     }
     
-    // 5. MOCAP (if any)
+    // 5. MOCAP
     if (m_->nmocap > 0) {
-        mju_copy(d->mocap_pos, ptr, 3 * m_->nmocap); 
-        ptr += 3 * m_->nmocap;
-
-        mju_copy(d->mocap_quat, ptr, 4 * m_->nmocap); 
-        ptr += 4 * m_->nmocap;
+        mju_copy(d->mocap_pos, ptr, 3 * m_->nmocap); ptr += 3 * m_->nmocap;
+        mju_copy(d->mocap_quat, ptr, 4 * m_->nmocap); ptr += 4 * m_->nmocap;
     }
 
     // 6. User Data
     if (m_->nuserdata > 0) {
-        mju_copy(d->userdata, ptr, m_->nuserdata); 
-        ptr += m_->nuserdata;
+        mju_copy(d->userdata, ptr, m_->nuserdata); ptr += m_->nuserdata;
     }
 
-    // 7. Warm Start (Crucial for speed!)
-    mju_copy(d->qacc_warmstart, ptr, m_->nv); 
-    ptr += m_->nv;
+    // 7. Warm Start
+    mju_copy(d->qacc_warmstart, ptr, m_->nv); ptr += m_->nv;
 }
 
-// Save pristine initial state (called once per environment in init())
-void Sim::save_initial_state(int env_id, mjData* d) {
-    int offset = env_id * state_dim_;
-    double* dst = &global_initial_state_buffer[offset];
-
-    double* ptr = dst;
-
-    // 1. Time (1)
-    *ptr = d->time; 
-    ptr++;
-
-    // 2. QPOS (nq)
-    mju_copy(ptr, d->qpos, m_->nq); 
-    ptr += m_->nq;
-
-    // 3. QVEL (nv)
-    mju_copy(ptr, d->qvel, m_->nv); 
-    ptr += m_->nv;
-
-    // 4. ACT (na) - Only if model has actuators/muscles
-    if (m_->na > 0) {
-        mju_copy(ptr, d->act, m_->na); 
-        ptr += m_->na;
-    }
-    
-    // 5. MOCAP (if any)
-    if (m_->nmocap > 0) {
-        mju_copy(ptr, d->mocap_pos, 3 * m_->nmocap); 
-        ptr += 3 * m_->nmocap;
-
-        mju_copy(ptr, d->mocap_quat, 4 * m_->nmocap); 
-        ptr += 4 * m_->nmocap;
-    }
-
-    // 6. User Data
-    if (m_->nuserdata > 0) {
-        mju_copy(ptr, d->userdata, m_->nuserdata); 
-        ptr += m_->nuserdata;
-    }
-
-    // 7. Warm Start (Crucial for speed!)
-    mju_copy(ptr, d->qacc_warmstart, m_->nv); 
-    ptr += m_->nv;
+// Generic wrapper that handles the offset calculation
+// Pass 'global_simstate_buffer' OR 'global_initial_state_buffer'
+void Sim::save_state_to_buffer(int env_id, mjData* d, std::vector<double>& buffer) {
+    size_t offset = (size_t)env_id * (size_t)state_dim_;
+    serialize_state(d, &buffer[offset]);
 }
 
-// Load pristine initial state (used on reset)
-void Sim::load_initial_state(int env_id, mjData* d) {
-    int offset = env_id * state_dim_;
-    double* src = &global_initial_state_buffer[offset];
-
-    double* ptr = src;
-
-    // 1. Time (1)
-    d->time = *ptr; 
-    ptr++;
-
-    // 2. QPOS (nq)
-    mju_copy(d->qpos, ptr, m_->nq); 
-    ptr += m_->nq;
-
-    // 3. QVEL (nv)
-    mju_copy(d->qvel, ptr, m_->nv); 
-    ptr += m_->nv;
-
-    // 4. ACT (na) - Only if model has actuators/muscles
-    if (m_->na > 0) {
-        mju_copy(d->act, ptr, m_->na); 
-        ptr += m_->na;
-    }
-    
-    // 5. MOCAP (if any)
-    if (m_->nmocap > 0) {
-        mju_copy(d->mocap_pos, ptr, 3 * m_->nmocap); 
-        ptr += 3 * m_->nmocap;
-
-        mju_copy(d->mocap_quat, ptr, 4 * m_->nmocap); 
-        ptr += 4 * m_->nmocap;
-    }
-
-    // 6. User Data
-    if (m_->nuserdata > 0) {
-        mju_copy(d->userdata, ptr, m_->nuserdata); 
-        ptr += m_->nuserdata;
-    }
-
-    // 7. Warm Start (Crucial for speed!)
-    mju_copy(d->qacc_warmstart, ptr, m_->nv); 
-    ptr += m_->nv;
+// Generic wrapper for loading
+void Sim::load_state_from_buffer(int env_id, mjData* d, const std::vector<double>& buffer) {
+    size_t offset = (size_t)env_id * (size_t)state_dim_;
+    deserialize_state(d, &buffer[offset]);
 }
 
 void Sim::add_noise(mjData* d) {
@@ -302,7 +204,7 @@ void Sim::step_parallel() {
             // not perfectly divisible by n_cores_
             if (i >= num_envs) break;
             // load the state from the buffer
-            load_simstate(i, data);
+            load_state_from_buffer(i, data, global_simstate_buffer);
 
             // apply action
             int action_offset = i * action_dim;
@@ -314,6 +216,7 @@ void Sim::step_parallel() {
             mj_step(model, data);
 
             // Check if episode is done
+            // Add here a check_done method
             bool done = (data->time > max_sim_time_); 
 
             // Save the done flag
@@ -322,7 +225,7 @@ void Sim::step_parallel() {
             // Handle Reset or Continue
             if (done) {
                 // Load the pristine initial state
-                load_initial_state(i, data);
+                load_state_from_buffer(i, data, global_initial_state_buffer);
 
                 // Add randomization to the initial state
                 add_noise(data);
@@ -332,9 +235,10 @@ void Sim::step_parallel() {
             }
 
             // Save the current state (new initial state if reset, regular state otherwise)
-            save_simstate(i, data);
+            save_state_to_buffer(i, data, global_simstate_buffer);
 
             // Update observation buffer (next observation so the agent can act)
+            // Also here a method might be needed
             int obs_offset = i * obs_dim;
             for (int k = 0; k < obs_dim; k++) {
                 global_observation_buffer[obs_offset + k] = data->qpos[k];
@@ -344,3 +248,12 @@ void Sim::step_parallel() {
 
 }
 
+float* Sim::get_observation_buffer() {
+    return &global_observation_buffer[0];
+}
+
+float* Sim::get_action_buffer() {
+    return &global_action_buffer[0];
+}
+
+}

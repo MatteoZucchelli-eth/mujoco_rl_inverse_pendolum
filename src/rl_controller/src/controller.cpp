@@ -111,6 +111,15 @@ namespace rl {
             *value_ptr = value;
         }
     }
+
+    void Controller::save(const std::string& directory, int iteration) {
+        std::string actor_path = directory + "/actor_" + std::to_string(iteration) + ".pt";
+        std::string critique_path = directory + "/critique_" + std::to_string(iteration) + ".pt";
+        
+        torch::save(actor_, actor_path);
+        torch::save(critique_, critique_path);
+        std::cout << "Saved models at iteration " << iteration << std::endl; 
+    }
     
     Controller::~Controller() {}
 }

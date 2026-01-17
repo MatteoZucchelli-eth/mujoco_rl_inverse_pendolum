@@ -300,7 +300,16 @@ void Sim::run(int steps) {
         // Parallel physics step and store data
         // We pass the current step index 's' to store data in the correct slot of rollout buffers
         step_parallel(s);
-    }    
+    } 
+
+    // Compute value of the "next" state (the one we landed in after the last step)
+    // This provides the bootstrap value V(s_T)
+    #pragma omp parallel
+    {
+        int thread_id = omp_get_thread_num();
+        controller_->computeActions(thread_id);
+    }
+   
     // Compute rewards to go (returns) after collecting all steps
     compute_returns(steps);
     compute_advantages(steps);
@@ -374,15 +383,18 @@ void Sim::compute_returns(int steps) {
     #pragma omp parallel for
     for (int env_id = 0; env_id < num_envs; ++env_id) {
         float gae = 0.0;
-        float next_value = 0.0; // Value of terminal state is 0
+        
+        // Initialize next_value with the value of the state AFTER the last step (s_T)
+        // This handles the case where the batch ends but the episode is not done (bootstrapping).
+        float next_value = global_value_buffer[env_id]; 
         
         // Iterate backwards from last step to 0
         for (int t = steps - 1; t >= 0; --t) {
             size_t idx = (size_t)t * num_envs + env_id;
             
             // Allow for non-terminal returns calculation
-            // If rollout_dones[idx] is true, next value is 0
-            // Otherwise it's the discounted return from t+1
+            // If rollout_dones[idx] is true, next value is 0 (terminal state has 0 value)
+            // Otherwise it's the discounted return from t+1 + reward
             
             float reward = rollout_rewards[idx];
             bool done = rollout_dones[idx];

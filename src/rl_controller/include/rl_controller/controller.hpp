@@ -17,6 +17,7 @@ namespace rl {
             void updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
                               const std::vector<float>& log_probs_old, const std::vector<float>& returns,
                               const std::vector<float>& advantages);
+            void save(const std::string& directory, int iteration);
 
         private:
             torch::nn::Sequential actor_{nullptr};

@@ -1,9 +1,19 @@
 #include <iostream>
+#include <filesystem>
 #include <mujoco_rl/sim.hpp>
 #include <rl_controller/controller.hpp>
 
+namespace fs = std::filesystem;
+
 int main() {
     std::cout << "Creating the Sim" << std::endl;
+
+    // Create checkpoint directory
+    std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints";
+    if (!fs::exists(checkpoint_dir)) {
+        fs::create_directories(checkpoint_dir);
+        std::cout << "Created checkpoint directory: " << checkpoint_dir << std::endl;
+    }
 
     std::string model_path = "/workspaces/inverse_pendolum_training/src/inverse_pendolum_model/scene.xml";
 
@@ -35,6 +45,10 @@ int main() {
     for (int i = 0; i < num_iterations; ++i) {
         std::cout << "Iteration " << i + 1 << "/" << num_iterations << " started..." << std::endl;
         sim.run(steps_per_iteration);
+
+        if ((i + 1) % 10 == 0) {
+            controller->save(checkpoint_dir, i + 1);
+        }
     }
    
     return 0;

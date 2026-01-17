@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <vector>
 #include <omp.h>
+#include <cmath>
 #include <mujoco_rl_utils/utils.hpp>
 #include <rl_controller/controller.hpp>
 #include <cstdlib>

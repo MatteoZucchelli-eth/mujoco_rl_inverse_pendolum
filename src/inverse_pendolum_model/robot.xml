@@ -57,6 +57,6 @@
   
   <actuator>
      <!-- Changed to motor for force control on the cart (base), typical for CartPole -->
-     <motor name="base_actuator" joint="base_x_joint" gear="100" ctrlrange="-100 100" ctrllimited="true"/>
+     <motor name="base_actuator" joint="base_x_joint" gear="10000" ctrlrange="-1 1" ctrllimited="true"/>
   </actuator>
 </mujoco>

@@ -22,8 +22,8 @@ int main() {
     // from a configuration file
     sim.init();   
 
-    // Set Torch to single-threaded execution for interference to avoid OpenMP conflicts
-    torch::set_num_threads(1);
+    // // Set Torch to single-threaded execution for interference to avoid OpenMP conflicts
+    // torch::set_num_threads(1);
 
     // Setup controller with access to all Sim buffers
     int num_envs = 1000; // Matches Sim default
@@ -49,7 +49,7 @@ int main() {
         std::cout << "Iteration " << i + 1 << "/" << num_iterations << " started..." << std::endl;
         sim.run(steps_per_iteration);
 
-        if ((i + 1) % 10 == 0) {
+        if ((i + 1) % 25 == 0) {
             controller->save(checkpoint_dir, i + 1);
         }
     }

@@ -195,7 +195,7 @@ void Sim::add_noise(mjData* d) {
     }
 }
 void Sim::step_parallel(int step_idx) {
-    #pragma omp parallel
+    #pragma omp parallel num_threads(n_cores_)
     {
         int thread_id = omp_get_thread_num();
         if (thread_id >= n_cores_) {
@@ -245,8 +245,6 @@ void Sim::step_parallel(int step_idx) {
                 // Forward kinematics to ensure consistency
                 mj_forward(model, data);
             }
-            std::cout << "I am here 2" << std::endl;
-
 
             // Save the current state (new initial state if reset, regular state otherwise)
             save_state_to_buffer(i, data, global_simstate_buffer);
@@ -314,7 +312,7 @@ void Sim::run(int steps) {
 
     for (int s = 0; s < steps; ++s) {
         // Parallel inference
-        #pragma omp parallel
+        #pragma omp parallel num_threads(n_cores_)
         {
             int thread_id = omp_get_thread_num();
             // Ensure thread_id is within bounds, just in case
@@ -330,7 +328,7 @@ void Sim::run(int steps) {
 
     // Compute value of the "next" state (the one we landed in after the last step)
     // This provides the bootstrap value V(s_T)
-    #pragma omp parallel
+    #pragma omp parallel num_threads(n_cores_)
     {
         int thread_id = omp_get_thread_num();
         controller_->computeActions(thread_id);
@@ -342,7 +340,7 @@ void Sim::run(int steps) {
 
     // Calculate and log mean reward
     double total_reward = 0.0;
-    #pragma omp parallel for reduction(+:total_reward)
+    #pragma omp parallel for reduction(+:total_reward) num_threads(n_cores_)
     for (size_t i = 0; i < rollout_rewards.size(); ++i) {
         total_reward += (double)rollout_rewards[i];
     }
@@ -380,11 +378,13 @@ double Sim::compute_reward(const mjData* d) {
         angle = d->qpos[0];
         vel = d->qvel[0];
     }
+    double target_angle = M_PI_2; 
     
-    // Reward for keeping pole upright (angle close to 0)
+    double angle_error = angle - target_angle;
+    // Reward for keeping pole upright (angle close to pi/2)
     // small angle approximation or cos(angle)
     // Here using simple quadratic cost
-    return -(angle * angle + 0.1 * vel * vel) + 1.0; 
+    return -(angle_error * angle_error + 0.1 * vel * vel) + 1.0; 
 }
 
 void Sim::store_rollout_step(int step_idx, int env_id) {
@@ -416,7 +416,7 @@ void Sim::compute_returns(int steps) {
     rollout_returns.resize(rollout_rewards.size());
 
     // Compute GAE or just returns separately for each environment
-    #pragma omp parallel for
+    #pragma omp parallel for num_threads(n_cores_)
     for (int env_id = 0; env_id < num_envs; ++env_id) {
         float gae = 0.0;
         
@@ -448,7 +448,7 @@ void Sim::compute_returns(int steps) {
 
 void Sim::compute_advantages(int steps) {
     // Advantage = Returns - Value
-    #pragma omp parallel for
+    #pragma omp parallel for num_threads(n_cores_)
     for (size_t i = 0; i < rollout_returns.size(); ++i) {
         rollout_advantages[i] = rollout_returns[i] - rollout_values[i];
     }

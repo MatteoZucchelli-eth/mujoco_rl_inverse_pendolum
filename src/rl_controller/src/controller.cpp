@@ -15,6 +15,69 @@ namespace rl {
     void Controller::init() {
         actor_ = Network::makeActor(obs_dim, action_dim);
         critique_ = Network::makeCritique(obs_dim);
+        
+        // Initialize optimizer
+        critique_optimizer_ = std::make_unique<torch::optim::Adam>(critique_->parameters(), torch::optim::AdamOptions(1e-3));
+        actor_optimizer_ = std::make_unique<torch::optim::Adam>(actor_->parameters(), torch::optim::AdamOptions(3e-4));
+    }
+
+    void Controller::updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
+                                  const std::vector<float>& log_probs_old, const std::vector<float>& returns,
+                                  const std::vector<float>& advantages) {
+        
+        int64_t num_samples = observations.size() / obs_dim;
+        
+        // Tensorize everything once
+        auto obs_tensor = torch::from_blob((void*)observations.data(), {num_samples, obs_dim}, torch::kFloat32);
+        auto act_tensor = torch::from_blob((void*)actions.data(), {num_samples, action_dim}, torch::kFloat32);
+        auto log_probs_old_tensor = torch::from_blob((void*)log_probs_old.data(), {num_samples, 1}, torch::kFloat32);
+        auto ret_tensor = torch::from_blob((void*)returns.data(), {num_samples, 1}, torch::kFloat32);
+        auto adv_tensor = torch::from_blob((void*)advantages.data(), {num_samples, 1}, torch::kFloat32);
+
+        // Normalize advantages
+        adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-8);
+
+        // Hyperparameters
+        int epochs = 10;
+        int batch_size = 64;
+        float clip_param = 0.2;
+
+        actor_->train();
+        critique_->train();
+
+        auto dataset_size = num_samples;
+        
+        // Joint training loop (Interleaved updates)
+        for (int epoch = 0; epoch < epochs; ++epoch) {
+             auto indices = torch::randperm(dataset_size, torch::kLong);
+             
+             for (int64_t i = 0; i < dataset_size; i += batch_size) {
+                 auto batch_indices = indices.slice(0, i, std::min(i + batch_size, dataset_size));
+                 
+                 auto obs_batch = obs_tensor.index_select(0, batch_indices);
+                 auto act_batch = act_tensor.index_select(0, batch_indices);
+                 auto old_log_prob_batch = log_probs_old_tensor.index_select(0, batch_indices);
+                 auto ret_batch = ret_tensor.index_select(0, batch_indices);
+                 auto adv_batch = adv_tensor.index_select(0, batch_indices);
+
+                 // --- 1. Update Critique ---
+                 critique_optimizer_->zero_grad();
+                 auto predicted_values = critique_->forward(obs_batch);
+                 auto value_loss = torch::mse_loss(predicted_values, ret_batch);
+                 value_loss.backward();
+                 critique_optimizer_->step();
+
+                 // --- 2. Update Actor ---
+                 actor_optimizer_->zero_grad();
+                 auto new_log_prob = Network::evaluateActor(actor_, obs_batch, act_batch);
+                 auto ratio = torch::exp(new_log_prob - old_log_prob_batch);
+                 auto surr1 = ratio * adv_batch;
+                 auto surr2 = torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv_batch;
+                 auto actor_loss = -torch::min(surr1, surr2).mean();
+                 actor_loss.backward();
+                 actor_optimizer_->step();
+             }
+        }
     }
 
     void Controller::computeActions(int thread_id) {

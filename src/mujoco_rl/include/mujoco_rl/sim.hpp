@@ -92,8 +92,9 @@ private:
     void add_noise(mjData* d);
     double compute_reward(const mjData* d);
     void store_rollout_step(int step_idx, int env_id);
-    void step_parallel(int step_idx);    
+    void step_parallel(int step_idx);
     void compute_returns(int steps);
     void compute_advantages(int steps);
+    void train();
 };
 }

@@ -304,6 +304,13 @@ void Sim::run(int steps) {
     // Compute rewards to go (returns) after collecting all steps
     compute_returns(steps);
     compute_advantages(steps);
+    
+    // Train Policy and Value Function
+    train();
+}
+
+void Sim::train() {
+    controller_->updatePolicy(rollout_observations, rollout_actions, rollout_log_probs, rollout_returns, rollout_advantages);
 }
 
 // Reward based on angle (upright = 0) and angular velocity

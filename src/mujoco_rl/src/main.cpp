@@ -28,8 +28,14 @@ int main() {
     controller->init();
     sim.set_controller(controller);
 
-    // Run rollout
-    sim.run(100); // Run for 100 steps
+    // Run training loop
+    int num_iterations = 100;
+    int steps_per_iteration = 200;
+
+    for (int i = 0; i < num_iterations; ++i) {
+        std::cout << "Iteration " << i + 1 << "/" << num_iterations << " started..." << std::endl;
+        sim.run(steps_per_iteration);
+    }
    
     return 0;
 }

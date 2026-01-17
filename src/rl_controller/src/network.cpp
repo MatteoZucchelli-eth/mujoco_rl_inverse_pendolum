@@ -67,6 +67,33 @@ namespace rl {
         return {actions, log_prob.item<float>()};
     }
 
+    torch::Tensor Network::evaluateActor(torch::nn::Sequential module, const torch::Tensor& obs, const torch::Tensor& actions) {
+        // This function is for training, so Gradients are kept
+        // obs: [batch, obs_dim]
+        // actions: [batch, action_dim] (already squashed by tanh)
+
+        torch::Tensor output = module->forward(obs);
+        auto chunks = output.chunk(2, 1);
+        auto mu = chunks[0];
+        auto log_std = chunks[1];
+        
+        log_std = torch::clamp(log_std, -20.0, 2.0);
+        auto std_dev = torch::exp(log_std);
+
+        // We need to invert the tanh to get the gaussian action
+        // action = tanh(action_unc) => action_unc = atanh(action)
+        // Numerical stability: clamp actions slightly inside (-1, 1)
+        auto actions_clamped = torch::clamp(actions, -0.999999, 0.999999);
+        auto action_unc = torch::atanh(actions_clamped);
+
+        // Compute log prob
+        // sum over last dim (action dim)
+        auto log_prob = -0.5 * torch::pow((action_unc - mu) / std_dev, 2) - log_std - 0.5 * std::log(2 * M_PI);
+        log_prob = log_prob - torch::log(1.0 - torch::pow(actions_clamped, 2) + 1e-6);
+        
+        return log_prob.sum(1, true); // Keep dim [batch, 1]
+    }
+
     float Network::forwardCritique(torch::nn::Sequential module, const float* obs_ptr, int obs_dim) {
         torch::NoGradGuard no_grad;
         auto options = torch::TensorOptions().dtype(torch::kFloat32);

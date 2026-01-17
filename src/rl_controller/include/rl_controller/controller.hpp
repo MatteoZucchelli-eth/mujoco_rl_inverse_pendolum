@@ -14,10 +14,17 @@ namespace rl {
             ~Controller();
             void init();
             void computeActions(int thread_id);
+            void updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
+                              const std::vector<float>& log_probs_old, const std::vector<float>& returns,
+                              const std::vector<float>& advantages);
+
         private:
             torch::nn::Sequential actor_{nullptr};
             torch::nn::Sequential critique_{nullptr};
             
+            std::unique_ptr<torch::optim::Adam> critique_optimizer_;
+            std::unique_ptr<torch::optim::Adam> actor_optimizer_;
+
             float *global_action_buffer_ptr_;
             float *global_observation_buffer_ptr_;
             float *global_log_prob_buffer_ptr_;

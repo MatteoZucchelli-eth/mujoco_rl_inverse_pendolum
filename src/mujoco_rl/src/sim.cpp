@@ -269,9 +269,9 @@ void Sim::step_parallel(int step_idx) {
                 
                 // Limit Base Position
                 if (model->nq >= 1) {
-                    if (std::abs(data->qpos[0]) > 1.3) {
+                    if (std::abs(data->qpos[0]) > 1.4) {
                         done = true;
-                        accumulated_reward -= 3000.0; // Terminal penalty
+                        accumulated_reward -= 1000.0; // Terminal penalty
                     }
                 }
 
@@ -443,6 +443,8 @@ double Sim::compute_reward(const mjData* d) {
     double base_pos = 0.0;
     double angle = 0.0;
     double vel_angle = 0.0;
+    double control = d->ctrl[0]; 
+
 
     // Check bounds and assign variables
     if (m_->nq >= 2) {
@@ -454,38 +456,44 @@ double Sim::compute_reward(const mjData* d) {
         angle = normalize_angle(d->qpos[0]);
         vel_angle = d->qvel[0];
     }
-
-    // Target Upright (Pi/2) - User specified 0 is horizontal
-    double target = M_PI_2;  // M_PI / 2
-    double diff = angle - target;
     
     double reward = 0.0;
+    double vel_max = 7.5;
     
-    // 1. Term to maintain upright posture
-    reward += -0.1 * (diff * diff);
-
-    // // 2. Term to minimize velocity
-    reward += -0.05 * (vel_angle * vel_angle);
-    // // 2.5 Term to minimize control
-    double control = d->ctrl[0];
-    reward += -0.001 * (control * control);    
+    if (std::abs(vel_angle) > vel_max) {
+        reward += -1 * ((std::abs(vel_angle) - vel_max) * (std::abs(vel_angle) - vel_max));
+    } else {
+        if (std::abs(angle) > angle_threshold) {
+        // Here just swing, penalize a little the velocity but not too much
+        reward += -0.5;
+        reward += -0.001 * (vel_angle * vel_angle);
+        if (std::cos(angle) < 0) reward += -0.5;
+    } else {
+        // 1. Term to maintain upright posture
+        // Minimizing angle^2
+        reward += 1.0;
+        reward += -0.1 * (angle * angle);
+        // // 2. Term to minimize velocity
+        reward += -0.1 * (vel_angle * vel_angle);
+        // // 2.5 Term to minimize control
+    }
+    }
+   
+    
     // // 3. Term to not reach the end of the base (Shaping)
-    reward += -0.001 * (base_pos * base_pos);
-
-    // // 4. Penalize if under horizontal line (sin(angle) < 0)
-    // // Assuming 0 and Pi are horizontal
-    if (std::sin(angle) < 0) {
-        reward -= 0.01; 
+    reward += -0.001 * (control * control);  
+    reward += -0.01 * (base_pos * base_pos);
+    if (std::abs(base_pos) > 1.3) {
+        reward += -1 * (base_pos * base_pos);
     }
 
+
     // Alive bonus (High enough to ensure "Survival" > "Suicide")
-    // Penalties can sum up to approx -25 (10 (angle) + 10 (sine) + 5 (vel/pos))
-    // So +30.0 ensures net reward is > 0, preventing early termination suicide.
-    reward += 1.0;
+    reward += 0.05;
 
     // std::cout << "The reward is " << reward << " for this angle: " << angle << " velocity: " << vel_angle << " position: " << base_pos << " and control: " << control << std::endl;
     
-    return reward; 
+    return reward*0.5; 
 }
 
 void Sim::store_rollout_step(int step_idx, int env_id) {

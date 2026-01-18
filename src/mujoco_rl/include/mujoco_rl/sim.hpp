@@ -54,10 +54,10 @@ private:
     std::vector<MjDataPtr> d_;
 
     // Settings
-    const int num_envs = 80;
+    const int num_envs = 96;
     const int obs_dim = 4; // qpos (2) + qvel (2)
     const int action_dim = 1;
-    const double max_sim_time_ = 17.5;
+    const double max_sim_time_ = 20;
     const double noise_min = -1.0;
     const double noise_max = 1.0;
     const double gamma = 0.9;
@@ -120,6 +120,7 @@ private:
     void train();
 
     int decimation = 20;
+    double angle_threshold = 0.4;
     // 10Hz control (0.1s) / 0.005s physics = 20 steps
 };
 }

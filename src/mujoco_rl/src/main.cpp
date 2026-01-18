@@ -9,7 +9,7 @@ int main() {
     std::cout << "Creating the Sim" << std::endl;
 
     // Create checkpoint directory
-    std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints";
+    std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints_2";
     if (!fs::exists(checkpoint_dir)) {
         fs::create_directories(checkpoint_dir);
         std::cout << "Created checkpoint directory: " << checkpoint_dir << std::endl;
@@ -21,7 +21,7 @@ int main() {
     sim.init(model_path.c_str());   
 
     // Setup controller with access to all Sim buffers
-    int num_envs = 80;
+    int num_envs = 96;
     int n_cores = omp_get_num_procs();
     
     auto controller = std::make_shared<rl::Controller>(
@@ -37,8 +37,8 @@ int main() {
     sim.set_controller(controller);
 
     // Run training loop
-    int num_iterations = 50;
-    int steps_per_iteration = 2000;
+    int num_iterations = 100;
+    int steps_per_iteration = 2500;
 
     for (int i = 0; i < num_iterations; ++i) {
         std::cout << "Iteration " << i + 1 << "/" << num_iterations << " started..." << std::endl;

@@ -19,6 +19,10 @@ namespace rl {
         // Initialize optimizer
         critique_optimizer_ = std::make_unique<torch::optim::Adam>(critique_->parameters(), torch::optim::AdamOptions(1e-3));
         actor_optimizer_ = std::make_unique<torch::optim::Adam>(actor_->parameters(), torch::optim::AdamOptions(1e-3));
+    
+        // Ensure eval mode for initial rollouts
+        actor_->eval();
+        critique_->eval();
     }
 
     void Controller::updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
@@ -39,7 +43,7 @@ namespace rl {
 
         // Hyperparameters
         int epochs = 10;
-        int batch_size = 256;
+        int batch_size = 512;
         float clip_param = 0.2;
 
         actor_->train();
@@ -47,6 +51,11 @@ namespace rl {
 
         auto dataset_size = num_samples;
         
+        double total_actor_loss = 0.0;
+        double total_critique_loss = 0.0;
+        double total_entropy = 0.0; // Approximation: -mean(log_prob)
+        int num_updates = 0;
+
         // Joint training loop (Interleaved updates)
         for (int epoch = 0; epoch < epochs; ++epoch) {
              auto indices = torch::randperm(dataset_size, torch::kLong);
@@ -66,18 +75,41 @@ namespace rl {
                  auto value_loss = torch::mse_loss(predicted_values, ret_batch);
                  value_loss.backward();
                  critique_optimizer_->step();
+                 
+                 total_critique_loss += value_loss.item<double>();
 
                  // --- 2. Update Actor ---
                  actor_optimizer_->zero_grad();
-                 auto new_log_prob = Network::evaluateActor(actor_, obs_batch, act_batch);
+                 auto eval_result = Network::evaluateActor(actor_, obs_batch, act_batch);
+                 auto new_log_prob = eval_result.first;
+                 auto entropy = eval_result.second;
+
                  auto ratio = torch::exp(new_log_prob - old_log_prob_batch);
                  auto surr1 = ratio * adv_batch;
                  auto surr2 = torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv_batch;
-                 auto actor_loss = -torch::min(surr1, surr2).mean();
+                 
+                 // Entropy bonus to prevent collapse
+                 float entropy_coef = 0.01;
+                 // We want to maximize entropy => minimize -entropy
+                 auto entropy_loss = -entropy.mean();
+                 
+                 auto actor_loss = -torch::min(surr1, surr2).mean() + entropy_coef * entropy_loss;
                  actor_loss.backward();
                  actor_optimizer_->step();
+
+                 total_actor_loss += actor_loss.item<double>();
+                 total_entropy += entropy.mean().item<double>(); // Actual entropy
+                 num_updates++;
              }
         }
+        
+        std::cout << "  Actor Loss: " << total_actor_loss / num_updates 
+                  << " | Critic Loss: " << total_critique_loss / num_updates 
+                  << " | Approx Entropy: " << total_entropy / num_updates << std::endl;
+
+        // Switch back to eval mode for rollout
+        actor_->eval();
+        critique_->eval();
     }
 
     void Controller::computeActions(int thread_id) {
@@ -119,6 +151,13 @@ namespace rl {
         torch::save(actor_, actor_path);
         torch::save(critique_, critique_path);
         std::cout << "Saved models at iteration " << iteration << std::endl; 
+    }
+
+    void Controller::load(const std::string& actor_path) {
+        torch::load(actor_, actor_path);
+        actor_->eval(); // Set to eval mode
+        if (critique_) critique_->eval(); // Critique might not be loaded, strictly speaking we only need actor for visualization
+        std::cout << "Loaded actor from " << actor_path << std::endl;
     }
     
     Controller::~Controller() {}

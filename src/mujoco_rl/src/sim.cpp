@@ -2,14 +2,20 @@
 
 namespace mj_pool {
 
+// Helper function to normalize angle to [-pi, pi]
+inline double normalize_angle(double angle) {
+    while (angle > M_PI)  angle -= 2 * M_PI;
+    while (angle < -M_PI) angle += 2 * M_PI;
+    return angle;
+}
+
 Sim::Sim() {
     std::cout << "Hello world"  << std::endl;
 }
 
-void Sim::init() {
-    // Run sequentially once to fill the buffer
-    // Ensure we have created per-core data structures. create_data()
-    // will also allocate the per-core mjData objects if needed.
+void Sim::init(const char* filename) {
+
+    create_model(filename);
     if (d_.empty()) {
         create_data();
     }
@@ -23,13 +29,30 @@ void Sim::init() {
         // Reset the temporary data before saving initial states
         mj_resetData(m_.get(), d_[0].get());
         
-        // Optional: Apply initial randomization here
-        
         // Save this pristine initial state (never overwritten)
         save_state_to_buffer(i, d_[0].get(), global_initial_state_buffer);
         
         // Also save to current state buffer so first step can begin
         save_state_to_buffer(i, d_[0].get(), global_simstate_buffer);
+
+        // Populate initial Observation so the agent doesn't receive zeros on the first step
+        int obs_offset = i * obs_dim;
+        
+        // Copy qpos
+        int qpos_limit = std::min(m_->nq, obs_dim);
+        for (int k = 0; k < qpos_limit; k++) {
+            float val = (float)d_[0]->qpos[k];
+            if ((m_->nq >= 2 && k == 1) || (m_->nq == 1 && k == 0)) {
+                val = (float)normalize_angle(val);
+            }
+            global_observation_buffer[obs_offset + k] = val;
+        }
+        
+        // Copy qvel
+        int qvel_limit = std::min(m_->nv, obs_dim - qpos_limit);
+        for (int k = 0; k < qvel_limit; k++) {
+            global_observation_buffer[obs_offset + qpos_limit + k] = (float)d_[0]->qvel[k];
+        }
     }
 
     std::cout << "Simulation initialization completed" << std::endl;
@@ -47,8 +70,7 @@ void Sim::create_model(const char* filename) {
 
     m_ = MjModelPtr(m_raw);
     
-    // Set simulation timestep to 0.01 seconds
-    m_->opt.timestep = 0.01;
+    m_->opt.timestep = 0.005;
 
     state_dim_ = 
     1 +                 // d->time
@@ -105,6 +127,11 @@ void Sim::create_data() {
     global_simstate_buffer.resize((size_t)num_envs * (size_t)state_dim_);
     global_initial_state_buffer.resize((size_t)num_envs * (size_t)state_dim_);  // Separate buffer for pristine initial states
     global_done_buffer.resize((size_t)num_envs);
+
+    // Resize episode tracking
+    env_accumulated_reward.assign((size_t)num_envs, 0.0);
+    env_accumulated_length.assign((size_t)num_envs, 0.0);
+    omp_init_lock(&stats_lock);
 
     std::cout << "Created data for device with number of cores: " << n_cores_ <<std::endl;
     std::cout << "Each core  will execute: " << envs_per_thread_ << " simulations" << std::endl;
@@ -226,30 +253,52 @@ void Sim::step_parallel(int step_idx) {
                 data->ctrl[k] = global_action_buffer[action_offset + k];
             }
 
-            // step physics
-            mj_step(model, data);
+            double accumulated_reward = 0.0;
+            bool done = false;
+            int decimation = 20;
 
-            // Compute reward
-            double reward = compute_reward(data);
+            for (int j = 0; j < decimation; j++) {
+                mj_step(model, data);
 
-            // Check if episode is done
-            bool done = (data->time > max_sim_time_); 
-            
-            // Limit Base Position
-            if (model->nq >= 1) {
-                if (std::abs(data->qpos[0]) > 1.25) {
-                    done = true;
-                    reward -= 1000.0; // Terminal penalty
+                // Compute reward
+                double r = compute_reward(data);
+                accumulated_reward += r;
+
+                // Check if episode is done
+                done = (data->time > max_sim_time_); 
+                
+                // Limit Base Position
+                if (model->nq >= 1) {
+                    if (std::abs(data->qpos[0]) > 1.3) {
+                        done = true;
+                        accumulated_reward -= 3000.0; // Terminal penalty
+                    }
                 }
+
+                if (done) break;
             }
 
-            global_reward_buffer[i] = (float)reward;
-            global_done_buffer[i] = done; 
+            global_reward_buffer[i] = (float)accumulated_reward;
+            global_done_buffer[i] = done;  
+
+            // Update Episode Stats
+            env_accumulated_reward[i] += accumulated_reward;
+            env_accumulated_length[i] += 1.0;
 
             // Save transition to rollout buffer (obs_t, act_t, rew_t, val_t, log_prob_t)
             store_rollout_step(step_idx, i);
             // Handle Reset or Continue
             if (done) {
+                // Store stats
+                omp_set_lock(&stats_lock);
+                completed_episode_rewards.push_back(env_accumulated_reward[i]);
+                completed_episode_lengths.push_back(env_accumulated_length[i]);
+                omp_unset_lock(&stats_lock);
+
+                // Reset stats
+                env_accumulated_reward[i] = 0.0;
+                env_accumulated_length[i] = 0.0;
+
                 // Load the pristine initial state
                 load_state_from_buffer(i, data, global_initial_state_buffer);
 
@@ -272,7 +321,11 @@ void Sim::step_parallel(int step_idx) {
             
             // Copy qpos
             for (int k = 0; k < qpos_limit; k++) {
-                global_observation_buffer[obs_offset + k] = (float)data->qpos[k];
+                float val = (float)data->qpos[k];
+                if ((model->nq >= 2 && k == 1) || (model->nq == 1 && k == 0)) {
+                    val = (float)normalize_angle(val);
+                }
+                global_observation_buffer[obs_offset + k] = val;
             }
             
             // Copy qvel. We continue filling the buffer from where qpos left off.
@@ -348,9 +401,8 @@ void Sim::run(int steps) {
         controller_->computeActions(thread_id);
     }
    
-    // Compute rewards to go (returns) after collecting all steps
-    compute_returns(steps);
-    compute_advantages(steps);
+    // Compute gae after collecting all steps
+    compute_gae(steps);
 
     // Calculate and log mean reward
     double total_reward = 0.0;
@@ -359,7 +411,24 @@ void Sim::run(int steps) {
         total_reward += (double)rollout_rewards[i];
     }
     double mean_reward = total_reward / (double)rollout_rewards.size();
-    std::cout << "Mean Batch Reward: " << mean_reward << std::endl;
+    
+    // Average Episode Return
+    double mean_ep_reward = 0.0;
+    double mean_ep_len = 0.0;
+    if (!completed_episode_rewards.empty()) {
+        double sum_ep_rew = 0;
+        double sum_ep_len = 0;
+        for(auto v : completed_episode_rewards) sum_ep_rew += v;
+        for(auto v : completed_episode_lengths) sum_ep_len += v;
+        mean_ep_reward = sum_ep_rew / completed_episode_rewards.size();
+        mean_ep_len = sum_ep_len / completed_episode_lengths.size();
+        
+        // Clear for next iteration
+        completed_episode_rewards.clear();
+        completed_episode_lengths.clear();
+    }
+
+    std::cout << "Mean Batch Reward (Per Step): " << mean_reward << " | Mean Episode Return: " << mean_ep_reward << " | Mean Ep Length: " << mean_ep_len << std::endl;
     
     // Train Policy and Value Function
     train();
@@ -378,14 +447,14 @@ double Sim::compute_reward(const mjData* d) {
     // Check bounds and assign variables
     if (m_->nq >= 2) {
         base_pos = d->qpos[0];
-        angle = d->qpos[1];
+        angle = normalize_angle(d->qpos[1]);
         vel_angle = d->qvel[1]; // Velocity of the joint
     } else {
         // Fallback or single joint
-        angle = d->qpos[0];
+        angle = normalize_angle(d->qpos[0]);
         vel_angle = d->qvel[0];
     }
-    
+
     // Target Upright (Pi/2) - User specified 0 is horizontal
     double target = M_PI_2;  // M_PI / 2
     double diff = angle - target;
@@ -393,23 +462,29 @@ double Sim::compute_reward(const mjData* d) {
     double reward = 0.0;
     
     // 1. Term to maintain upright posture
-    reward += -(diff * diff);
+    reward += -0.1 * (diff * diff);
 
-    // 2. Term to minimize velocity
-    reward += -0.1 * (vel_angle * vel_angle);
-    
-    // 3. Term to not reach the end of the base (Shaping)
-    reward += -0.1 * (base_pos * base_pos);
+    // // 2. Term to minimize velocity
+    reward += -0.05 * (vel_angle * vel_angle);
+    // // 2.5 Term to minimize control
+    double control = d->ctrl[0];
+    reward += -0.001 * (control * control);    
+    // // 3. Term to not reach the end of the base (Shaping)
+    reward += -0.001 * (base_pos * base_pos);
 
-    // 4. Penalize if under horizontal line (sin(angle) < 0)
-    // Assuming 0 and Pi are horizontal
+    // // 4. Penalize if under horizontal line (sin(angle) < 0)
+    // // Assuming 0 and Pi are horizontal
     if (std::sin(angle) < 0) {
-        reward -= 10.0; 
+        reward -= 0.01; 
     }
 
-    // Alive bonus
+    // Alive bonus (High enough to ensure "Survival" > "Suicide")
+    // Penalties can sum up to approx -25 (10 (angle) + 10 (sine) + 5 (vel/pos))
+    // So +30.0 ensures net reward is > 0, preventing early termination suicide.
     reward += 1.0;
 
+    // std::cout << "The reward is " << reward << " for this angle: " << angle << " velocity: " << vel_angle << " position: " << base_pos << " and control: " << control << std::endl;
+    
     return reward; 
 }
 
@@ -438,45 +513,115 @@ void Sim::store_rollout_step(int step_idx, int env_id) {
     }
 }
 
-void Sim::compute_returns(int steps) {
+void Sim::compute_gae(int steps) {
+    // Resize vectors
+    rollout_advantages.resize(rollout_rewards.size());
     rollout_returns.resize(rollout_rewards.size());
 
-    // Compute GAE or just returns separately for each environment
+    float gae_lambda = 0.95f; // Standard PPO param
+
     #pragma omp parallel for num_threads(n_cores_)
     for (int env_id = 0; env_id < num_envs; ++env_id) {
-        float gae = 0.0;
+        float last_gae_lam = 0.0;
         
-        // Initialize next_value with the value of the state AFTER the last step (s_T)
-        // This handles the case where the batch ends but the episode is not done (bootstrapping).
-        float next_value = global_value_buffer[env_id]; 
-        
-        // Iterate backwards from last step to 0
+        // Get value of state T+1 (Bootstrapping)
+        float next_value = global_value_buffer[env_id];
+
+        // Loop backwards
         for (int t = steps - 1; t >= 0; --t) {
             size_t idx = (size_t)t * num_envs + env_id;
             
-            // Allow for non-terminal returns calculation
-            // If rollout_dones[idx] is true, next value is 0 (terminal state has 0 value)
-            // Otherwise it's the discounted return from t+1 + reward
-            
             float reward = rollout_rewards[idx];
             bool done = rollout_dones[idx];
+            float current_value = rollout_values[idx];
+
+            // If done, next_value is 0. If not, it's the Value of next state
+            float next_non_terminal = done ? 0.0f : 1.0f;
             
-            // Standard Rewards-to-Go (Monte Carlo Returns)
-            if (done) {
-                next_value = 0.0;
-            }
-            
-            next_value = reward + gamma * next_value;
-            rollout_returns[idx] = next_value;
+            // 1. Calculate Delta (Temporal Difference Error)
+            // delta = r + gamma * V(t+1) - V(t)
+            float delta = reward + gamma * next_value * next_non_terminal - current_value;
+
+            // 2. Calculate GAE
+            // A_t = delta + (gamma * lambda) * A_t+1
+            last_gae_lam = delta + gamma * gae_lambda * next_non_terminal * last_gae_lam;
+
+            // Store Advantage
+            rollout_advantages[idx] = last_gae_lam;
+
+            // Store Return (Observed Return = Advantage + Value)
+            rollout_returns[idx] = last_gae_lam + current_value;
+
+            // Update next_value for the next iteration (which is t-1)
+            next_value = current_value;
         }
     }
 }
 
-void Sim::compute_advantages(int steps) {
-    // Advantage = Returns - Value
-    #pragma omp parallel for num_threads(n_cores_)
-    for (size_t i = 0; i < rollout_returns.size(); ++i) {
-        rollout_advantages[i] = rollout_returns[i] - rollout_values[i];
+// Visualization Helpers
+void Sim::step_inference() {
+    if (!controller_) return;
+
+    // 1. Compute Actions
+    #pragma omp parallel num_threads(n_cores_)
+    {
+        int thread_id = omp_get_thread_num();
+        if (thread_id < n_cores_) {
+             controller_->computeActions(thread_id);
+        }
     }
+
+    // 2. Step Physics (We use index 0 for rollout buffers as we don't care about history here)
+    // We need to resize buffers if they haven't been sized (run() usually does this)
+    if (rollout_observations.empty()) {
+        int steps = 1;
+        rollout_observations.resize((size_t)steps * (size_t)num_envs * (size_t)obs_dim);
+        rollout_actions.resize((size_t)steps * (size_t)num_envs * (size_t)action_dim);
+        rollout_log_probs.resize((size_t)steps * (size_t)num_envs);
+        rollout_values.resize((size_t)steps * (size_t)num_envs);
+        rollout_rewards.resize((size_t)steps * (size_t)num_envs);
+        rollout_returns.resize((size_t)steps * (size_t)num_envs);
+        rollout_advantages.resize((size_t)steps * (size_t)num_envs);
+        rollout_dones.resize((size_t)steps * (size_t)num_envs);
+    }
+
+    step_parallel(0);
 }
+
+void Sim::load_state_to_mjdata(int env_id, mjData* d) {
+    // Copy from global buffer to provided mjData
+    if (env_id < 0 || env_id >= num_envs) return;
+    load_state_from_buffer(env_id, d, global_simstate_buffer);
+}
+
+void Sim::set_env_state(int env_id, const std::vector<double>& qpos, const std::vector<double>& qvel) {
+    if (env_id >= num_envs) return;
+    
+    // 1. Load current state to d_[0] to preserve other fields (time, mocap, etc)
+    // Note: d_[0] is used by worker threads too, but step_inference is usually called sequentially 
+    // in visualization loop. If sim_loop runs in thread, we must be careful.
+    // But 'keyboard' callback runs in main thread.
+    // Ideally we should use a local data structure or lock.
+    // Since Sim uses d_ per core, and visualization is single "environment" focused usually (index 0).
+    // Let's create a temp data if we can, but we need the model. 
+    // d_[0] is risky if visualization thread is running step_inference parallel to this.
+    
+    // For now assuming the mutex in visualize.cpp protects us?
+    // In visualize.cpp:
+    // keyboard() -> locks mtx -> calls g_sim->set_env_state 
+    // sim_loop() -> locks mtx -> calls g_sim->step_inference
+    // So they are mutually exclusive. Safe to use d_[0] as long as step_inference doesn't use d_[0] in a way that persists across calls?
+    // step_parallel uses d_[thread_id]. thread 0 uses d_[0].
+    // Since we are locked, step_parallel is NOT running when set_env_state is running.
+    
+    load_state_from_buffer(env_id, d_[0].get(), global_simstate_buffer);
+    
+    // 2. Modify
+    for(size_t i=0; i<qpos.size() && i < (size_t)m_->nq; ++i) d_[0]->qpos[i] = qpos[i];
+    for(size_t i=0; i<qvel.size() && i < (size_t)m_->nv; ++i) d_[0]->qvel[i] = qvel[i];
+    
+    // 3. Save back
+    save_state_to_buffer(env_id, d_[0].get(), global_simstate_buffer);
+}
+
 }

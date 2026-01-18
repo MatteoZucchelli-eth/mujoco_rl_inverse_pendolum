@@ -18,6 +18,7 @@ namespace rl {
                               const std::vector<float>& log_probs_old, const std::vector<float>& returns,
                               const std::vector<float>& advantages);
             void save(const std::string& directory, int iteration);
+            void load(const std::string& actor_path);
 
         private:
             torch::nn::Sequential actor_{nullptr};

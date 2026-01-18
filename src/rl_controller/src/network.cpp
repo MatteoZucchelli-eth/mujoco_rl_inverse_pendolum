@@ -4,6 +4,8 @@ namespace rl {
 
     torch::nn::Sequential Network::makeActor(int obs_dim, int action_dim) {
         torch::nn::Sequential model;
+        // Normalize input
+        model->push_back(torch::nn::LayerNorm(torch::nn::LayerNormOptions({obs_dim})));
         // Input: obs_dim, Output: action_dim
         model->push_back(torch::nn::Linear(obs_dim, 64));
         model->push_back(torch::nn::ReLU());
@@ -16,6 +18,8 @@ namespace rl {
 
     torch::nn::Sequential Network::makeCritique(int obs_dim) {
         torch::nn::Sequential model;
+        // Normalize input
+        model->push_back(torch::nn::BatchNorm1d(obs_dim));
         // Input: obs_dim, Output: Value (1)
         model->push_back(torch::nn::Linear(obs_dim, 64));
         model->push_back(torch::nn::ReLU());
@@ -31,6 +35,8 @@ namespace rl {
         auto options = torch::TensorOptions().dtype(torch::kFloat32);
         torch::Tensor input = torch::from_blob((void*)obs_ptr, {1, obs_dim}, options);
 
+        // here add the normalization of the input
+
         torch::Tensor output = module->forward(input);
 
         // Output has shape [1, 2 * action_dim] -> Split into mean and log_std
@@ -39,7 +45,7 @@ namespace rl {
         auto log_std = chunks[1];
         
         // Clamp log_std to maintain numerical stability
-        log_std = torch::clamp(log_std, -20.0, 2.0);
+        log_std = torch::clamp(log_std, -2.0, 2.0);
         auto std_dev = torch::exp(log_std);
 
         // Sample from Gaussian
@@ -67,7 +73,7 @@ namespace rl {
         return {actions, log_prob.item<float>()};
     }
 
-    torch::Tensor Network::evaluateActor(torch::nn::Sequential module, const torch::Tensor& obs, const torch::Tensor& actions) {
+    std::pair<torch::Tensor, torch::Tensor> Network::evaluateActor(torch::nn::Sequential module, const torch::Tensor& obs, const torch::Tensor& actions) {
         // This function is for training, so Gradients are kept
         // obs: [batch, obs_dim]
         // actions: [batch, action_dim] (already squashed by tanh)
@@ -77,7 +83,7 @@ namespace rl {
         auto mu = chunks[0];
         auto log_std = chunks[1];
         
-        log_std = torch::clamp(log_std, -20.0, 2.0);
+        log_std = torch::clamp(log_std, -2.0, 2.0);
         auto std_dev = torch::exp(log_std);
 
         // We need to invert the tanh to get the gaussian action
@@ -91,7 +97,12 @@ namespace rl {
         auto log_prob = -0.5 * torch::pow((action_unc - mu) / std_dev, 2) - log_std - 0.5 * std::log(2 * M_PI);
         log_prob = log_prob - torch::log(1.0 - torch::pow(actions_clamped, 2) + 1e-6);
         
-        return log_prob.sum(1, true); // Keep dim [batch, 1]
+        // Compute Entropy of the Gaussian distribution (ignoring tanh for maximization stability)
+        // H = 0.5 * (1 + log(2*pi) + 2 * log_std)
+        // Sum over action dim
+        auto entropy = (0.5 + 0.5 * std::log(2 * M_PI) + log_std).sum(1, true);
+
+        return {log_prob.sum(1, true), entropy};
     }
 
     float Network::forwardCritique(torch::nn::Sequential module, const float* obs_ptr, int obs_dim) {

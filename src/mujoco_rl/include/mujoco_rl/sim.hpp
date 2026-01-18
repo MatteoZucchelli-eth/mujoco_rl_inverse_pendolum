@@ -20,8 +20,7 @@ namespace mj_pool {
 class Sim {
 public:
     Sim();
-    void init();
-    void create_model(const char* filename);
+    void init(const char* filename);
     void create_data();
     void set_controller(std::shared_ptr<rl::Controller> controller);
     void run(int steps);
@@ -37,17 +36,30 @@ public:
     float* get_log_prob_buffer();
     float* get_value_buffer();
 
+    // Visualization and Debugging Tools
+    mjModel* get_model() { return m_.get(); }
+    int get_num_envs() const { return num_envs; }
+    
+    // Perform one complete step (Inference + Physics with Decimation)
+    void step_inference();
+    
+    // Sync external mjData with internal state buffer
+    void load_state_to_mjdata(int env_id, mjData* d);
+    
+    // Set environment state externally
+    void set_env_state(int env_id, const std::vector<double>& qpos, const std::vector<double>& qvel);
+
 private:
     MjModelPtr m_;
     std::vector<MjDataPtr> d_;
 
     // Settings
-    const int num_envs = 1000;
+    const int num_envs = 80;
     const int obs_dim = 4; // qpos (2) + qvel (2)
     const int action_dim = 1;
-    const double max_sim_time_ = 10;
-    const double noise_min = -0.01;
-    const double noise_max = 0.01;
+    const double max_sim_time_ = 17.5;
+    const double noise_min = -1.0;
+    const double noise_max = 1.0;
     const double gamma = 0.9;
 
     int state_dim_;
@@ -61,6 +73,14 @@ private:
     std::vector<float> global_log_prob_buffer;
     std::vector<float> global_value_buffer;
     std::vector<float> global_reward_buffer;
+
+    // Episode Tracking
+    std::vector<double> env_accumulated_reward;
+    std::vector<double> env_accumulated_length;
+    // Shared buffers for completed episodes (need locking if accessed in parallel)
+    std::vector<double> completed_episode_rewards;
+    std::vector<double> completed_episode_lengths;
+    omp_lock_t stats_lock;
 
     // Rollout Buffers (History)
     std::vector<float> rollout_observations;
@@ -78,6 +98,8 @@ private:
 
     std::shared_ptr<rl::Controller> controller_;
 
+    void create_model(const char* filename);
+
     void worker_thread(int thread_id, int envs_per_thread);
 
     void apply_actions_thread(int thread_id);
@@ -94,8 +116,10 @@ private:
     double compute_reward(const mjData* d);
     void store_rollout_step(int step_idx, int env_id);
     void step_parallel(int step_idx);
-    void compute_returns(int steps);
-    void compute_advantages(int steps);
+    void compute_gae(int steps);
     void train();
+
+    int decimation = 20;
+    // 10Hz control (0.1s) / 0.005s physics = 20 steps
 };
 }

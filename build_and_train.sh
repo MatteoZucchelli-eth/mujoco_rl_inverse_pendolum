@@ -3,4 +3,4 @@ cmake ..
 make -j$(nproc)
 
 # Run the executable
-./bin/mujoco_rl &
+./bin/mujoco_rl

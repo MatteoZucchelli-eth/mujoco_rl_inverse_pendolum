@@ -1,4 +1,6 @@
 #include <rl_controller/controller.hpp>
+#include <filesystem>
+#include <iostream>
 
 namespace rl {
     Controller::Controller(float *global_action_buffer_ptr, float *global_observation_buffer_ptr, 
@@ -89,7 +91,7 @@ namespace rl {
                  auto surr2 = torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv_batch;
                  
                  // Entropy bonus to prevent collapse
-                 float entropy_coef = 0.01;
+                 float entropy_coef = 0.001;
                  // We want to maximize entropy => minimize -entropy
                  auto entropy_loss = -entropy.mean();
                  
@@ -155,8 +157,40 @@ namespace rl {
 
     void Controller::load(const std::string& actor_path) {
         torch::load(actor_, actor_path);
-        actor_->eval(); // Set to eval mode
-        if (critique_) critique_->eval(); // Critique might not be loaded, strictly speaking we only need actor for visualization
+        
+        // Infer critique path: replace "actor" with "critique"
+        std::string critique_path = actor_path;
+        size_t pos = critique_path.find("actor");
+        if (pos != std::string::npos) {
+            critique_path.replace(pos, 5, "critique");
+            
+            // Check if file exists
+            std::filesystem::path cp(critique_path);
+            if (std::filesystem::exists(cp)) {
+                 torch::load(critique_, critique_path);
+                 std::cout << "Loaded critique from " << critique_path << std::endl;
+            } else {
+                 std::cout << "Warning: Critique checkpoint not found at " << critique_path << ". Starting with random critic." << std::endl;
+            }
+        }
+
+        actor_->train(); // Set to train mode? Or eval?
+        // Usually for training restart we want train mode. But updatePolicy switches it anyway.
+        // However, computeActions uses it.
+        // check computeActions... it doesn't explicitly setting mode, so it uses current mode.
+        // In main loop:
+        // sim.run() -> step_inference() -> computeActions()
+        // Default mode for Sequential is train.
+        // But load() sets it to eval() in the old code.
+        // If we are training, we should probably be in eval mode for collecting rollouts (no dropout/batchnorm updates), 
+        // and train mode for updatePolicy.
+        // The original code `updatePolicy`:
+        //    actor_->train(); critique_->train(); ... UPDATE ... actor_->eval(); critique_->eval();
+        // So we should leave it in eval() for rollouts.
+        
+        actor_->eval(); 
+        if (critique_) critique_->eval();
+        
         std::cout << "Loaded actor from " << actor_path << std::endl;
     }
     

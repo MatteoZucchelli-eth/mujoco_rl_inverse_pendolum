@@ -18,6 +18,8 @@ mj_pool::Sim* g_sim = nullptr; // Global sim pointer
 std::mutex mtx;
 std::atomic<bool> run_sim(true);
 std::atomic<float> last_action(0.0f); // Store last action for display
+std::atomic<float> last_reward(0.0f); // Store last reward for display
+std::atomic<float> cumulative_reward(0.0f); // Store cumulative reward for display
 
 mjvCamera cam;
 mjvOption opt;
@@ -41,7 +43,13 @@ void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods) {
             std::cout << "[User] Resetting environment..." << std::endl;
             std::vector<double> qpos(m->nq, 0.0);
             std::vector<double> qvel(m->nv, 0.0);
-            if (m->nq > 1) qpos[1] = 0.1; 
+            
+            // Set pendulum angle to PI
+            if (m->nq > 1) {
+                qpos[1] = M_PI; 
+            } else if (m->nq == 1) {
+                qpos[0] = M_PI;
+            }
 
             g_sim->set_env_state(0, qpos, qvel);
         } else if (key == GLFW_KEY_RIGHT) { // Push
@@ -154,6 +162,13 @@ void sim_loop() {
                 // Capture action for display
                 float* acts = g_sim->get_action_buffer();
                 if (acts) last_action = acts[0];
+
+                // Capture reward for display
+                float* rewards = g_sim->get_reward_buffer(0);
+                if (rewards) last_reward = rewards[0];
+
+                // Capture cumulative reward for display
+                cumulative_reward = (float)g_sim->get_accumulated_reward(0);
             }
         }
         // Simulation Step is 0.1s (decimation 20 * 0.005). 
@@ -275,8 +290,8 @@ int main(int argc, char** argv) {
         char title[100] = "Inverted Pendulum RL";
         char content[500];
         
-        sprintf(content, "Time: %.2f\nPos: %.2f\nAngle: %.2f\nAction: %.2f\nFPS: %d", 
-                vis_d->time, vis_d->qpos[0], vis_d->qpos[1], last_action.load(), 60);
+        sprintf(content, "Time: %.2f\nPos: %.2f\nAngle: %.2f\nAction: %.2f\nReward: %.2f\nCum Reward: %.2f\nFPS: %d", 
+                vis_d->time, vis_d->qpos[0], vis_d->qpos[1], last_action.load(), last_reward.load(), cumulative_reward.load(), 60);
 
         mjr_overlay(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, title, content, &con);
         

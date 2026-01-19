@@ -29,6 +29,13 @@ void Sim::init(const char* filename) {
         // Reset the temporary data before saving initial states
         mj_resetData(m_.get(), d_[0].get());
         
+        // Set initial pendulum angle to PI
+        if (m_->nq >= 2) {
+            d_[0]->qpos[1] = M_PI;
+        } else if (m_->nq == 1) {
+            d_[0]->qpos[0] = M_PI;
+        }
+
         // Save this pristine initial state (never overwritten)
         save_state_to_buffer(i, d_[0].get(), global_initial_state_buffer);
         
@@ -269,7 +276,7 @@ void Sim::step_parallel(int step_idx) {
                 
                 // Limit Base Position
                 if (model->nq >= 1) {
-                    if (std::abs(data->qpos[0]) > 1.4) {
+                    if (std::abs(data->qpos[0]) > 1.25) {
                         done = true;
                         accumulated_reward -= 1000.0; // Terminal penalty
                     }
@@ -357,6 +364,13 @@ float* Sim::get_observation_buffer() { return &global_observation_buffer[0]; }
 float* Sim::get_action_buffer() { return &global_action_buffer[0]; }
 float* Sim::get_log_prob_buffer() { return &global_log_prob_buffer[0]; }
 float* Sim::get_value_buffer() { return &global_value_buffer[0]; }
+
+double Sim::get_accumulated_reward(int env_id) {
+    if (env_id >= 0 && env_id < num_envs) {
+        return env_accumulated_reward[env_id];
+    }
+    return 0.0;
+}
 
 void Sim::set_controller(std::shared_ptr<rl::Controller> controller) {
     controller_ = controller;
@@ -458,42 +472,42 @@ double Sim::compute_reward(const mjData* d) {
     }
     
     double reward = 0.0;
-    double vel_max = 7.5;
+    double vel_max = 10;
     
     if (std::abs(vel_angle) > vel_max) {
-        reward += -1 * ((std::abs(vel_angle) - vel_max) * (std::abs(vel_angle) - vel_max));
+        reward += -10 * ((std::abs(vel_angle) - vel_max) * (std::abs(vel_angle) - vel_max));
     } else {
         if (std::abs(angle) > angle_threshold) {
         // Here just swing, penalize a little the velocity but not too much
-        reward += -0.5;
-        reward += -0.001 * (vel_angle * vel_angle);
-        if (std::cos(angle) < 0) reward += -0.5;
+        reward += 0.5 * (std::cos(angle) - 1);
+        reward += -0.01 * (vel_angle * vel_angle);
     } else {
         // 1. Term to maintain upright posture
         // Minimizing angle^2
-        reward += 1.0;
-        reward += -0.1 * (angle * angle);
-        // // 2. Term to minimize velocity
-        reward += -0.1 * (vel_angle * vel_angle);
-        // // 2.5 Term to minimize control
+        reward += 0.5;
+        reward += -0.01 * (angle * angle);
+        reward += -0.01 * (vel_angle * vel_angle);
+        if (std::abs(angle) < 0.25 && std::abs(vel_angle) < 1.0) {
+            reward += 1.0;
+        }
     }
     }
    
     
     // // 3. Term to not reach the end of the base (Shaping)
     reward += -0.001 * (control * control);  
-    reward += -0.01 * (base_pos * base_pos);
-    if (std::abs(base_pos) > 1.3) {
-        reward += -1 * (base_pos * base_pos);
-    }
+    // reward += -0.1 * (base_pos * base_pos);
+    // if (std::abs(base_pos) > 1.3) {
+    //     reward += -0.1 * (base_pos * base_pos);
+    // }
 
 
     // Alive bonus (High enough to ensure "Survival" > "Suicide")
-    reward += 0.05;
+    reward += 0.01;
 
     // std::cout << "The reward is " << reward << " for this angle: " << angle << " velocity: " << vel_angle << " position: " << base_pos << " and control: " << control << std::endl;
     
-    return reward*0.5; 
+    return reward*0.05; 
 }
 
 void Sim::store_rollout_step(int step_idx, int env_id) {

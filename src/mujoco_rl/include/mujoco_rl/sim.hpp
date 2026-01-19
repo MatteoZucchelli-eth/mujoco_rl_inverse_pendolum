@@ -36,6 +36,8 @@ public:
     float* get_log_prob_buffer();
     float* get_value_buffer();
 
+    double get_accumulated_reward(int env_id);
+
     // Visualization and Debugging Tools
     mjModel* get_model() { return m_.get(); }
     int get_num_envs() const { return num_envs; }
@@ -54,12 +56,12 @@ private:
     std::vector<MjDataPtr> d_;
 
     // Settings
-    const int num_envs = 96;
+    const int num_envs = 104;
     const int obs_dim = 4; // qpos (2) + qvel (2)
     const int action_dim = 1;
     const double max_sim_time_ = 20;
-    const double noise_min = -1.0;
-    const double noise_max = 1.0;
+    const double noise_min = -0.1;
+    const double noise_max = 0.1;
     const double gamma = 0.9;
 
     int state_dim_;

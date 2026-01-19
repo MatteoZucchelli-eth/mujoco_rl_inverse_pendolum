@@ -36,7 +36,7 @@
         <!-- Joint origin from URDF: xyz="-6.93889e-18 0 0.075" -->
         <body name="base" pos="-6.93889e-18 0 0.075">
             <joint name="base_x_joint" type="slide" axis="1 0 0" range="-1.25 1.25" damping="0" frictionloss="0"/>
-            <inertial pos="0 0 0" mass="0.8" diaginertia="0.01 0.01 0.01"/>
+            <inertial pos="0 0 0" mass="0.5" diaginertia="0.01 0.01 0.01"/>
             
             <geom type="mesh" class="visual" mesh="base_part" material="base_part_material"/>
             <geom type="mesh" class="collision" mesh="base_part"/>
@@ -49,7 +49,7 @@
                  <joint name="pendulum_y_joint" type="hinge" axis="0 1 0"/>
                  <!-- Shifted Center of Mass to make it a pendulum (matches visual horizontal alignment) -->
                  <!-- FIXED: Reduced CoM distance from 1.0 to 0.2 to match typical visual scale -->
-                 <inertial pos="0.4 -0.025 0" mass="0.3" diaginertia="0.001 0.01 0.01"/>
+                 <inertial pos="0.7 -0.025 0" mass="0.3" diaginertia="0.001 0.01 0.01"/>
                  
                  <geom type="mesh" class="visual" mesh="pendolum" material="pendolum_material" euler="-3.14159 1.570796 -3.14159"/>
                  <geom type="mesh" class="collision" mesh="pendolum" euler="-3.14159 1.570796 -3.14159" contype="0" conaffinity="0"/>

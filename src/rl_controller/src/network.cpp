@@ -23,7 +23,9 @@ namespace rl {
         // Input: obs_dim, Output: Value (1)
         model->push_back(torch::nn::Linear(obs_dim, 64));
         model->push_back(torch::nn::ReLU());
-        model->push_back(torch::nn::Linear(64, 32));
+        model->push_back(torch::nn::Linear(64, 128));
+        model->push_back(torch::nn::ReLU());
+        model->push_back(torch::nn::Linear(128, 32));
         model->push_back(torch::nn::ReLU());
         model->push_back(torch::nn::Linear(32, 1));
         return model;

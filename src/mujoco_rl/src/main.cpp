@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
     std::cout << "Creating the Sim" << std::endl;
 
     // Create checkpoint directory
-    std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints_6";
+    std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints_7";
     if (!fs::exists(checkpoint_dir)) {
         fs::create_directories(checkpoint_dir);
         std::cout << "Created checkpoint directory: " << checkpoint_dir << std::endl;

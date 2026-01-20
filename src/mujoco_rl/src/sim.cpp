@@ -276,7 +276,7 @@ void Sim::step_parallel(int step_idx) {
                 
                 // Limit Base Position
                 if (model->nq >= 1) {
-                    if (std::abs(data->qpos[0]) > 1.25) {
+                    if (std::abs(data->qpos[0]) > 1.3) {
                         done = true;
                         accumulated_reward -= 1000.0; // Terminal penalty
                     }
@@ -487,8 +487,8 @@ double Sim::compute_reward(const mjData* d) {
         reward += 0.5;
         reward += -0.01 * (angle * angle);
         reward += -0.01 * (vel_angle * vel_angle);
-        if (std::abs(angle) < 0.25 && std::abs(vel_angle) < 1.0) {
-            reward += 1.0;
+        if (std::abs(vel_angle) < 0.5) {
+            reward += 2.0;
         }
     }
     }

@@ -91,7 +91,7 @@ namespace rl {
                  auto surr2 = torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv_batch;
                  
                  // Entropy bonus to prevent collapse
-                 float entropy_coef = 0.0025;
+                 float entropy_coef = 0.005;
                  // We want to maximize entropy => minimize -entropy
                  auto entropy_loss = -entropy.mean();
                  

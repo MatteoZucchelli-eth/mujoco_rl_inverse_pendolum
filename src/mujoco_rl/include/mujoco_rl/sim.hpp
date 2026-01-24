@@ -121,8 +121,8 @@ private:
     void compute_gae(int steps);
     void train();
 
-    int decimation = 20;
-    double angle_threshold = 0.4;
+    int decimation = 2;
+    double angle_threshold = 0.1;
     // 10Hz control (0.1s) / 0.005s physics = 20 steps
 };
 }

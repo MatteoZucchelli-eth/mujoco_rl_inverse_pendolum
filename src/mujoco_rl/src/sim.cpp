@@ -76,8 +76,21 @@ void Sim::create_model(const char* filename) {
     }
 
     m_ = MjModelPtr(m_raw);
-    
-    m_->opt.timestep = 0.005;
+    std::cout << "--- Checking Model Masses ---" << std::endl;
+
+    // YOU NEED THIS LOOP
+    for (int i = 0; i < m_->nbody; i++) {
+        // 1. Get the name
+        const char* name = mj_id2name(m_.get(), mjOBJ_BODY, i);
+        if (!name) name = "world/unnamed";
+
+        // 2. Get the mass
+        double mass = m_->body_mass[i];
+
+        // 3. Print
+        std::cout << "ID " << i << " [" << name << "]: " << mass << " kg" << std::endl;
+    }
+    m_->opt.timestep = 0.01;
 
     state_dim_ = 
     1 +                 // d->time
@@ -262,7 +275,7 @@ void Sim::step_parallel(int step_idx) {
 
             double accumulated_reward = 0.0;
             bool done = false;
-            int decimation = 20;
+            int decimation = 2;
 
             for (int j = 0; j < decimation; j++) {
                 mj_step(model, data);
@@ -276,7 +289,7 @@ void Sim::step_parallel(int step_idx) {
                 
                 // Limit Base Position
                 if (model->nq >= 1) {
-                    if (std::abs(data->qpos[0]) > 1.3) {
+                    if (std::abs(data->qpos[0]) > 2.4) {
                         done = true;
                         accumulated_reward -= 1000.0; // Terminal penalty
                     }

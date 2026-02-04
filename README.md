@@ -1,1 +1,11 @@
-High-Performance C++ PPO for Inverted Pendulum (MuJoCo)This repository implements Proximal Policy Optimization (PPO) from scratch in C++ to solve the classical Inverted Pendulum balance task.Unlike standard Python-based RL implementations, this project is designed for high-throughput CPU training. It leverages MuJoCo for physics and OpenMP to parallelize simulation rollouts across all available CPU cores, removing the bottleneck of single-threaded Python environments.Key FeaturesPure C++ Architecture: Training loop, buffer management, and GAE calculation are all implemented in C++ for maximum speed.CPU Parallelization: Uses OpenMP to run $N$ environments in parallel, achieving high sample efficiency without a GPU.LibTorch Integration: Utilizes the PyTorch C++ API (LibTorch) for tensor operations and gradient descent.Continuous Control: Implements a Gaussian policy for continuous torque control.
+# High-Performance C++ PPO for Inverted Pendulum (MuJoCo)
+
+This repository implements **Proximal Policy Optimization (PPO)** from scratch in **C++** to solve the classical **Inverted Pendulum** balance task.
+
+Unlike standard Python-based RL implementations, this project is designed for **high-throughput CPU training**. It leverages **MuJoCo** for physics and **OpenMP** to parallelize simulation rollouts across all available CPU cores, removing the bottleneck of single-threaded Python environments.
+
+### Key Features
+* **Pure C++ Architecture:** Training loop, buffer management, and GAE calculation are all implemented in C++ for maximum speed.
+* **CPU Parallelization:** Uses `OpenMP` to run $N$ environments in parallel, achieving high sample efficiency without a GPU.
+* **LibTorch Integration:** Utilizes the PyTorch C++ API (LibTorch) for tensor operations and gradient descent.
+* **Continuous Control:** Implements a Gaussian policy for continuous torque control.

@@ -290,7 +290,7 @@ void Sim::step_parallel(int step_idx) {
                 if (model->nq >= 1) {
                     if (std::abs(data->qpos[0]) > 2.4) {
                         done = true;
-                        accumulated_reward -= 1000.0; // Terminal penalty
+                        accumulated_reward -= 20.0; // Terminal penalty (matched to per-step reward scale)
                     }
                 }
 
@@ -514,12 +514,10 @@ double Sim::compute_reward(const mjData* d) {
     }
    
     
-    // // 3. Term to not reach the end of the base (Shaping)
-    reward += -0.001 * (control * control);  
-    // reward += -0.1 * (base_pos * base_pos);
-    // if (std::abs(base_pos) > 1.3) {
-    //     reward += -0.1 * (base_pos * base_pos);
-    // }
+    // Control effort penalty
+    reward += -0.001 * (control * control);
+    // Continuous cart position penalty: keeps cart centred, avoids wall shock
+    reward += -0.05 * (base_pos * base_pos);
 
 
     // Alive bonus (High enough to ensure "Survival" > "Suicide")

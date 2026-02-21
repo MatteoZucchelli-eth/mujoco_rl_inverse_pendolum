@@ -63,7 +63,7 @@ private:
     const double max_sim_time_   = 20.0;
     const double noise_min       = -0.1;
     const double noise_max       =  0.1;
-    const double gamma           = 0.9;
+    const double gamma           = 0.99;
     const int    decimation      = 6;
     const double angle_threshold = 0.1;
 

@@ -492,40 +492,26 @@ double Sim::compute_reward(const mjData* d) {
     }
     
     double reward = 0.0;
-    double vel_max = 20;
-    
-    if (std::abs(vel_angle) > vel_max) {
-        reward += -10 * ((std::abs(vel_angle) - vel_max) * (std::abs(vel_angle) - vel_max));
-    } else {
-        if (std::abs(angle) > angle_threshold) {
-        // Here just swing, penalize a little the velocity but not too much
-        reward += 0.5 * (std::cos(angle) - 1);
-        reward += -0.01 * (vel_angle * vel_angle);
-        } else {
-            // 1. Term to maintain upright posture
-            // Minimizing angle^2
-            reward += 0.5;
-            reward += -0.01 * (angle * angle);
-            reward += -0.01 * (vel_angle * vel_angle);
-            if (std::abs(vel_angle) < 0.5) {
-                reward += 2.0;
-            }
-        }
+
+    // ---- 1. Alive bonus (dominant signal: every step alive is a net win) ----
+    // Must exceed worst-case costs below so the agent never prefers suicide.
+    // Hanging worst-case costs ~1.05/substep, so 2.0 keeps it clearly positive.
+    reward += 2.0;
+
+    // ---- 2. Angle: encourage upright (cos(0)=1, cos(π)=-1) ----
+    reward += std::cos(angle);   // range [-1, +1]
+
+    // ---- 3. Small shaping terms ----
+    reward += -0.005 * (vel_angle * vel_angle);   // penalise fast spinning
+    reward += -0.001 * (control * control);        // penalise control effort
+    reward += -0.05  * (base_pos * base_pos);      // keep cart centred
+
+    // ---- 4. Bonus for being nearly upright and still ----
+    if (std::abs(angle) < angle_threshold && std::abs(vel_angle) < 0.5) {
+        reward += 3.0;
     }
-   
-    
-    // Control effort penalty
-    reward += -0.001 * (control * control);
-    // Continuous cart position penalty: keeps cart centred, avoids wall shock
-    reward += -0.05 * (base_pos * base_pos);
 
-
-    // Alive bonus (High enough to ensure "Survival" > "Suicide")
-    reward += 0.01;
-
-    // std::cout << "The reward is " << reward << " for this angle: " << angle << " velocity: " << vel_angle << " position: " << base_pos << " and control: " << control << std::endl;
-    
-    return reward*0.05; 
+    return reward * 0.05;  // scale to keep critic values manageable 
 }
 
 void Sim::store_rollout_step(int step_idx, int env_id) {

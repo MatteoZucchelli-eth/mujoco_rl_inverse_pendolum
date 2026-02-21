@@ -64,7 +64,7 @@ private:
     const double noise_min       = -0.1;
     const double noise_max       =  0.1;
     const double gamma           = 0.99;
-    const int    decimation      = 6;
+    const int    decimation      = 4;
     const double angle_threshold = 0.1;
 
     int state_dim_      = 0;

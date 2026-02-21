@@ -180,7 +180,8 @@ void sim_loop() {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <path_to_actor_checkpoint>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <path_to_network_checkpoint.pt>\n"
+                  << "Example: " << argv[0] << " checkpoints_7/network_100.pt\n";
         return 1;
     }
     std::string actor_path = argv[1];

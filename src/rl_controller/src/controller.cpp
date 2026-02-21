@@ -3,196 +3,167 @@
 #include <iostream>
 
 namespace rl {
-    Controller::Controller(float *global_action_buffer_ptr, float *global_observation_buffer_ptr, 
-                           float *global_log_prob_buffer_ptr, float *global_value_buffer_ptr,
-                           int num_envs, int n_cores) 
-        : global_action_buffer_ptr_(global_action_buffer_ptr), 
-          global_observation_buffer_ptr_(global_observation_buffer_ptr),
-          global_log_prob_buffer_ptr_(global_log_prob_buffer_ptr),
-          global_value_buffer_ptr_(global_value_buffer_ptr),
-          num_envs_(num_envs) {
-              envs_per_thread_ = (num_envs + n_cores - 1) / n_cores;
-          }
 
-    void Controller::init() {
-        actor_ = Network::makeActor(obs_dim, action_dim);
-        critique_ = Network::makeCritique(obs_dim);
-        
-        // Initialize optimizer
-        critique_optimizer_ = std::make_unique<torch::optim::Adam>(critique_->parameters(), torch::optim::AdamOptions(1e-3));
-        actor_optimizer_ = std::make_unique<torch::optim::Adam>(actor_->parameters(), torch::optim::AdamOptions(1e-3));
-    
-        // Ensure eval mode for initial rollouts
-        actor_->eval();
-        critique_->eval();
-    }
-
-    void Controller::updatePolicy(const std::vector<float>& observations, const std::vector<float>& actions, 
-                                  const std::vector<float>& log_probs_old, const std::vector<float>& returns,
-                                  const std::vector<float>& advantages) {
-        
-        int64_t num_samples = observations.size() / obs_dim;
-        
-        // Tensorize everything once
-        auto obs_tensor = torch::from_blob((void*)observations.data(), {num_samples, obs_dim}, torch::kFloat32);
-        auto act_tensor = torch::from_blob((void*)actions.data(), {num_samples, action_dim}, torch::kFloat32);
-        auto log_probs_old_tensor = torch::from_blob((void*)log_probs_old.data(), {num_samples, 1}, torch::kFloat32);
-        auto ret_tensor = torch::from_blob((void*)returns.data(), {num_samples, 1}, torch::kFloat32);
-        auto adv_tensor = torch::from_blob((void*)advantages.data(), {num_samples, 1}, torch::kFloat32);
-
-        // Normalize advantages
-        adv_tensor = (adv_tensor - adv_tensor.mean()) / (adv_tensor.std() + 1e-8);
-
-        // Hyperparameters
-        int epochs = 10;
-        int batch_size = 512;
-        float clip_param = 0.2;
-
-        actor_->train();
-        critique_->train();
-
-        auto dataset_size = num_samples;
-        
-        double total_actor_loss = 0.0;
-        double total_critique_loss = 0.0;
-        double total_entropy = 0.0; // Approximation: -mean(log_prob)
-        int num_updates = 0;
-
-        // Joint training loop (Interleaved updates)
-        for (int epoch = 0; epoch < epochs; ++epoch) {
-             auto indices = torch::randperm(dataset_size, torch::kLong);
-             
-             for (int64_t i = 0; i < dataset_size; i += batch_size) {
-                 auto batch_indices = indices.slice(0, i, std::min(i + batch_size, dataset_size));
-                 
-                 auto obs_batch = obs_tensor.index_select(0, batch_indices);
-                 auto act_batch = act_tensor.index_select(0, batch_indices);
-                 auto old_log_prob_batch = log_probs_old_tensor.index_select(0, batch_indices);
-                 auto ret_batch = ret_tensor.index_select(0, batch_indices);
-                 auto adv_batch = adv_tensor.index_select(0, batch_indices);
-
-                 // --- 1. Update Critique ---
-                 critique_optimizer_->zero_grad();
-                 auto predicted_values = critique_->forward(obs_batch);
-                 auto value_loss = torch::mse_loss(predicted_values, ret_batch);
-                 value_loss.backward();
-                 critique_optimizer_->step();
-                 
-                 total_critique_loss += value_loss.item<double>();
-
-                 // --- 2. Update Actor ---
-                 actor_optimizer_->zero_grad();
-                 auto eval_result = Network::evaluateActor(actor_, obs_batch, act_batch);
-                 auto new_log_prob = eval_result.first;
-                 auto entropy = eval_result.second;
-
-                 auto ratio = torch::exp(new_log_prob - old_log_prob_batch);
-                 auto surr1 = ratio * adv_batch;
-                 auto surr2 = torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * adv_batch;
-                 
-                 // Entropy bonus to prevent collapse
-                 float entropy_coef = 0.005;
-                 // We want to maximize entropy => minimize -entropy
-                 auto entropy_loss = -entropy.mean();
-                 
-                 auto actor_loss = -torch::min(surr1, surr2).mean() + entropy_coef * entropy_loss;
-                 actor_loss.backward();
-                 actor_optimizer_->step();
-
-                 total_actor_loss += actor_loss.item<double>();
-                 total_entropy += entropy.mean().item<double>(); // Actual entropy
-                 num_updates++;
-             }
-        }
-        
-        std::cout << "  Actor Loss: " << total_actor_loss / num_updates 
-                  << " | Critic Loss: " << total_critique_loss / num_updates 
-                  << " | Approx Entropy: " << total_entropy / num_updates << std::endl;
-
-        // Switch back to eval mode for rollout
-        actor_->eval();
-        critique_->eval();
-    }
-
-    void Controller::computeActions(int thread_id) {
-        int start_index = thread_id * envs_per_thread_;
-        int end_index = start_index + envs_per_thread_;
-
-        for (int i = start_index; i < end_index; i++) {
-            if (i >= num_envs_) break;
-
-            // Compute pointers for this specific environment
-            float* obs_ptr = global_observation_buffer_ptr_ + (i * obs_dim);
-            float* action_ptr = global_action_buffer_ptr_ + (i * action_dim);
-            float* log_prob_ptr = global_log_prob_buffer_ptr_ + i; // 1 float per env
-            float* value_ptr = global_value_buffer_ptr_ + i;       // 1 float per env
-
-            // Forward pass to get actions and log_probs
-            ActorOutput output = Network::forwardActor(actor_, obs_ptr, obs_dim);
-            
-            // Forward pass to get value
-            float value = Network::forwardCritique(critique_, obs_ptr, obs_dim);
-
-            // Store actions in the global buffer
-            for (int k = 0; k < action_dim; k++) {
-                if (k < (int)output.action.size()) {
-                    action_ptr[k] = output.action[k];
-                }
-            }
-            
-            // Store log_prob and value
-            *log_prob_ptr = output.log_prob;
-            *value_ptr = value;
-        }
-    }
-
-    void Controller::save(const std::string& directory, int iteration) {
-        std::string actor_path = directory + "/actor_" + std::to_string(iteration) + ".pt";
-        std::string critique_path = directory + "/critique_" + std::to_string(iteration) + ".pt";
-        
-        torch::save(actor_, actor_path);
-        torch::save(critique_, critique_path);
-        std::cout << "Saved models at iteration " << iteration << std::endl; 
-    }
-
-    void Controller::load(const std::string& actor_path) {
-        torch::load(actor_, actor_path);
-        
-        // Infer critique path: replace "actor" with "critique"
-        std::string critique_path = actor_path;
-        size_t pos = critique_path.find("actor");
-        if (pos != std::string::npos) {
-            critique_path.replace(pos, 5, "critique");
-            
-            // Check if file exists
-            std::filesystem::path cp(critique_path);
-            if (std::filesystem::exists(cp)) {
-                 torch::load(critique_, critique_path);
-                 std::cout << "Loaded critique from " << critique_path << std::endl;
-            } else {
-                 std::cout << "Warning: Critique checkpoint not found at " << critique_path << ". Starting with random critic." << std::endl;
-            }
-        }
-
-        actor_->train(); // Set to train mode? Or eval?
-        // Usually for training restart we want train mode. But updatePolicy switches it anyway.
-        // However, computeActions uses it.
-        // check computeActions... it doesn't explicitly setting mode, so it uses current mode.
-        // In main loop:
-        // sim.run() -> step_inference() -> computeActions()
-        // Default mode for Sequential is train.
-        // But load() sets it to eval() in the old code.
-        // If we are training, we should probably be in eval mode for collecting rollouts (no dropout/batchnorm updates), 
-        // and train mode for updatePolicy.
-        // The original code `updatePolicy`:
-        //    actor_->train(); critique_->train(); ... UPDATE ... actor_->eval(); critique_->eval();
-        // So we should leave it in eval() for rollouts.
-        
-        actor_->eval(); 
-        if (critique_) critique_->eval();
-        
-        std::cout << "Loaded actor from " << actor_path << std::endl;
-    }
-    
-    Controller::~Controller() {}
+Controller::Controller(float* action_buf, float* obs_buf,
+                       float* log_prob_buf, float* value_buf,
+                       int num_envs, int n_cores)
+    : action_buf_(action_buf),
+      obs_buf_(obs_buf),
+      log_prob_buf_(log_prob_buf),
+      value_buf_(value_buf),
+      num_envs_(num_envs)
+{
+    envs_per_thread_ = (num_envs + n_cores - 1) / n_cores;
 }
+
+Controller::~Controller() {}
+
+void Controller::init(float action_lo, float action_hi)
+{
+    network_   = ActorCritic(obs_dim, action_dim, action_lo, action_hi);
+    optimizer_ = std::make_unique<torch::optim::Adam>(
+        network_->parameters(),
+        torch::optim::AdamOptions(3e-4));
+
+    network_->eval();  // start in eval mode for rollout collection
+}
+
+// ---------------------------------------------------------------------------
+// computeActions — called once per rollout step, possibly from multiple threads
+// ---------------------------------------------------------------------------
+void Controller::computeActions(int thread_id)
+{
+    int start = thread_id * envs_per_thread_;
+    int end   = start + envs_per_thread_;
+
+    for (int i = start; i < end && i < num_envs_; ++i) {
+        const float* obs_ptr  = obs_buf_      + i * obs_dim;
+        float*       act_ptr  = action_buf_   + i * action_dim;
+        float*       lp_ptr   = log_prob_buf_ + i;
+        float*       val_ptr  = value_buf_    + i;
+
+        ActorCriticOutput out = network_->infer(obs_ptr);
+
+        for (int k = 0; k < action_dim; ++k)
+            act_ptr[k] = (k < (int)out.actions.size()) ? out.actions[k] : 0.0f;
+
+        *lp_ptr  = out.log_prob;
+        *val_ptr = out.value;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// updatePolicy — PPO joint actor-critic update
+// ---------------------------------------------------------------------------
+TrainingMetrics Controller::updatePolicy(
+    const std::vector<float>& observations,
+    const std::vector<float>& actions,
+    const std::vector<float>& log_probs_old,
+    const std::vector<float>& returns,
+    const std::vector<float>& advantages)
+{
+    int64_t N = (int64_t)observations.size() / obs_dim;
+
+    // Build tensors (clone so training cannot corrupt the rollout buffers)
+    auto obs_t     = torch::from_blob((void*)observations.data(), {N, obs_dim},    torch::kFloat32).clone();
+    auto act_t     = torch::from_blob((void*)actions.data(),      {N, action_dim}, torch::kFloat32).clone();
+    auto lp_old_t  = torch::from_blob((void*)log_probs_old.data(),{N, 1},          torch::kFloat32).clone();
+    auto ret_t     = torch::from_blob((void*)returns.data(),      {N, 1},          torch::kFloat32).clone();
+    auto adv_t     = torch::from_blob((void*)advantages.data(),   {N, 1},          torch::kFloat32).clone();
+
+    // Normalize advantages over the whole rollout batch
+    adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8f);
+
+    // PPO hyperparameters
+    const int   epochs      = 10;
+    const int64_t batch_size = 512;
+    const float clip_param  = 0.2f;
+    const float entropy_coef = 0.002f;
+    const float value_coef   = 0.5f;
+    const float max_grad_norm = 0.5f;
+
+    network_->train();
+
+    double sum_actor_loss  = 0.0;
+    double sum_critic_loss = 0.0;
+    double sum_entropy     = 0.0;
+    int    num_updates     = 0;
+
+    for (int epoch = 0; epoch < epochs; ++epoch) {
+        auto indices = torch::randperm(N, torch::kLong);
+
+        for (int64_t i = 0; i < N; i += batch_size) {
+            auto idx = indices.slice(0, i, std::min(i + batch_size, N));
+
+            auto obs_b    = obs_t.index_select(0, idx);
+            auto act_b    = act_t.index_select(0, idx);
+            auto lp_old_b = lp_old_t.index_select(0, idx);
+            auto ret_b    = ret_t.index_select(0, idx);
+            auto adv_b    = adv_t.index_select(0, idx);
+
+            // Forward pass through the unified network
+            auto [log_probs, entropy, values] = network_->evaluate(obs_b, act_b);
+
+            // --- Critic loss ---
+            auto critic_loss = torch::mse_loss(values, ret_b);
+
+            // --- Actor loss (PPO clipped surrogate) ---
+            auto ratio  = torch::exp(log_probs - lp_old_b);
+            auto surr1  = ratio * adv_b;
+            auto surr2  = torch::clamp(ratio, 1.0f - clip_param, 1.0f + clip_param) * adv_b;
+            auto actor_loss = -torch::min(surr1, surr2).mean();
+
+            // --- Entropy bonus (maximise entropy: subtract from total loss) ---
+            auto entropy_loss = -entropy.mean();
+
+            // --- Combined loss ---
+            auto total_loss = actor_loss
+                            + value_coef   * critic_loss
+                            + entropy_coef * entropy_loss;
+
+            optimizer_->zero_grad();
+            total_loss.backward();
+            torch::nn::utils::clip_grad_norm_(network_->parameters(), max_grad_norm);
+            optimizer_->step();
+
+            sum_actor_loss  += actor_loss.item<double>();
+            sum_critic_loss += critic_loss.item<double>();
+            sum_entropy     += entropy.mean().item<double>();
+            ++num_updates;
+        }
+    }
+
+    network_->eval();  // back to eval mode for next rollout
+
+    TrainingMetrics m;
+    if (num_updates > 0) {
+        m.actor_loss  = sum_actor_loss  / num_updates;
+        m.critic_loss = sum_critic_loss / num_updates;
+        m.entropy     = sum_entropy     / num_updates;
+    }
+
+    std::cout << "  Actor Loss: "  << m.actor_loss
+              << " | Critic Loss: " << m.critic_loss
+              << " | Entropy: "     << m.entropy << std::endl;
+    return m;
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint helpers
+// ---------------------------------------------------------------------------
+void Controller::save(const std::string& directory, int iteration)
+{
+    std::string path = directory + "/network_" + std::to_string(iteration) + ".pt";
+    torch::save(network_, path);
+    std::cout << "Saved model → " << path << std::endl;
+}
+
+void Controller::load(const std::string& network_path)
+{
+    torch::load(network_, network_path);
+    network_->eval();
+    std::cout << "Loaded model ← " << network_path << std::endl;
+}
+
+} // namespace rl
+

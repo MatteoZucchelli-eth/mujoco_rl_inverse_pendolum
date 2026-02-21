@@ -1,119 +1,108 @@
 #include <rl_controller/network.hpp>
+#include <cmath>
 
 namespace rl {
 
-    torch::nn::Sequential Network::makeActor(int obs_dim, int action_dim) {
-        torch::nn::Sequential model;
-        // Normalize input
-        model->push_back(torch::nn::LayerNorm(torch::nn::LayerNormOptions({obs_dim})));
-        // Input: obs_dim, Output: action_dim
-        model->push_back(torch::nn::Linear(obs_dim, 64));
-        model->push_back(torch::nn::ReLU());
-        model->push_back(torch::nn::Linear(64, 32));
-        model->push_back(torch::nn::ReLU());
-        // Output mean and log_std (2 * action_dim)
-        model->push_back(torch::nn::Linear(32, 2 * action_dim));
-        return model;
-    }
+// ---------------------------------------------------------------------------
+// ActorCriticImpl
+// ---------------------------------------------------------------------------
 
-    torch::nn::Sequential Network::makeCritique(int obs_dim) {
-        torch::nn::Sequential model;
-        // Normalize input
-        model->push_back(torch::nn::BatchNorm1d(obs_dim));
-        // Input: obs_dim, Output: Value (1)
-        model->push_back(torch::nn::Linear(obs_dim, 64));
-        model->push_back(torch::nn::ReLU());
-        model->push_back(torch::nn::Linear(64, 32));
-        model->push_back(torch::nn::ReLU());
-        model->push_back(torch::nn::Linear(32, 1));
-        return model;
-    }
-
-    ActorOutput Network::forwardActor(torch::nn::Sequential module, const float* obs_ptr, int obs_dim) {
-        torch::NoGradGuard no_grad; // No gradients needed for inference
-        // Create tensor from raw pointer
-        auto options = torch::TensorOptions().dtype(torch::kFloat32);
-        torch::Tensor input = torch::from_blob((void*)obs_ptr, {1, obs_dim}, options);
-
-        // here add the normalization of the input
-
-        torch::Tensor output = module->forward(input);
-
-        // Output has shape [1, 2 * action_dim] -> Split into mean and log_std
-        auto chunks = output.chunk(2, 1);
-        auto mu = chunks[0];
-        auto log_std = chunks[1];
-        
-        // Clamp log_std to maintain numerical stability
-        log_std = torch::clamp(log_std, -2.0, 2.0);
-        auto std_dev = torch::exp(log_std);
-
-        // Sample from Gaussian
-        auto epsilon = torch::randn_like(mu);
-        auto action_unc = mu + epsilon * std_dev; // Unconstrained action
-        
-        // Squash to [-1, 1]
-        auto action = torch::tanh(action_unc);
-
-        // Calculate log probability
-        // log_prob = log_prob_gaussian - log_det_jacobian_tanh
-        // log_prob_gaussian = -0.5 * ((x - mu)/sigma)^2 - log(sigma) - 0.5 * log(2pi)
-        // simplified using torch distributions or manually:
-        // Here we do it manually for the sampled value
-        auto log_prob = -0.5 * torch::pow((action_unc - mu) / std_dev, 2) - log_std - 0.5 * std::log(2 * M_PI);
-        // Tanh correction: log(1 - tanh^2(x))
-        // We sum over action dimensions (presumably action_dim=1 here so sum is trivial)
-        log_prob = log_prob - torch::log(1.0 - torch::pow(action, 2) + 1e-6);
-        log_prob = log_prob.sum(1); // Sum across action dimensions
-
-        // Convert output tensor back to vector<float>
-        action = action.contiguous();
-        std::vector<float> actions(action.data_ptr<float>(), action.data_ptr<float>() + action.numel());
-        
-        return {actions, log_prob.item<float>()};
-    }
-
-    std::pair<torch::Tensor, torch::Tensor> Network::evaluateActor(torch::nn::Sequential module, const torch::Tensor& obs, const torch::Tensor& actions) {
-        // This function is for training, so Gradients are kept
-        // obs: [batch, obs_dim]
-        // actions: [batch, action_dim] (already squashed by tanh)
-
-        torch::Tensor output = module->forward(obs);
-        auto chunks = output.chunk(2, 1);
-        auto mu = chunks[0];
-        auto log_std = chunks[1];
-        
-        log_std = torch::clamp(log_std, -2.0, 2.0);
-        auto std_dev = torch::exp(log_std);
-
-        // We need to invert the tanh to get the gaussian action
-        // action = tanh(action_unc) => action_unc = atanh(action)
-        // Numerical stability: clamp actions slightly inside (-1, 1)
-        auto actions_clamped = torch::clamp(actions, -0.999999, 0.999999);
-        auto action_unc = torch::atanh(actions_clamped);
-
-        // Compute log prob
-        // sum over last dim (action dim)
-        auto log_prob = -0.5 * torch::pow((action_unc - mu) / std_dev, 2) - log_std - 0.5 * std::log(2 * M_PI);
-        log_prob = log_prob - torch::log(1.0 - torch::pow(actions_clamped, 2) + 1e-6);
-        
-        // Compute Entropy of the Gaussian distribution (ignoring tanh for maximization stability)
-        // H = 0.5 * (1 + log(2*pi) + 2 * log_std)
-        // Sum over action dim
-        auto entropy = (0.5 + 0.5 * std::log(2 * M_PI) + log_std).sum(1, true);
-
-        return {log_prob.sum(1, true), entropy};
-    }
-
-    float Network::forwardCritique(torch::nn::Sequential module, const float* obs_ptr, int obs_dim) {
-        torch::NoGradGuard no_grad;
-        auto options = torch::TensorOptions().dtype(torch::kFloat32);
-        torch::Tensor input = torch::from_blob((void*)obs_ptr, {1, obs_dim}, options);
-
-        torch::Tensor output = module->forward(input);
-
-        // Return scalar value
-        return output.item<float>();
-    }
-
+ActorCriticImpl::ActorCriticImpl(int obs_dim, int action_dim,
+                                 float action_lo, float action_hi)
+    : obs_dim_(obs_dim),
+      action_dim_(action_dim),
+      action_lo_(action_lo),
+      action_hi_(action_hi),
+      action_scale_((action_hi - action_lo) / 2.0f),
+      action_bias_((action_hi + action_lo) / 2.0f)
+{
+    norm_        = register_module("norm",        torch::nn::LayerNorm(torch::nn::LayerNormOptions({obs_dim})));
+    fc1_         = register_module("fc1",         torch::nn::Linear(obs_dim, 256));
+    fc2_         = register_module("fc2",         torch::nn::Linear(256, 256));
+    fc3_         = register_module("fc3",         torch::nn::Linear(256, 256));
+    actor_head_  = register_module("actor_head",  torch::nn::Linear(256, 2 * action_dim));
+    critic_head_ = register_module("critic_head", torch::nn::Linear(256, 1));
 }
+
+std::pair<torch::Tensor, torch::Tensor>
+ActorCriticImpl::trunk_forward(const torch::Tensor& obs)
+{
+    auto x = norm_(obs);
+    x = torch::tanh(fc1_->forward(x));
+    x = torch::tanh(fc2_->forward(x));
+    x = torch::tanh(fc3_->forward(x));
+    return {actor_head_->forward(x), critic_head_->forward(x)};
+}
+
+ActorCriticOutput ActorCriticImpl::infer(const float* obs_ptr)
+{
+    torch::NoGradGuard no_grad;
+
+    auto input = torch::from_blob(
+        const_cast<float*>(obs_ptr), {1, obs_dim_},
+        torch::TensorOptions().dtype(torch::kFloat32)).clone();
+
+    auto [actor_raw, value_t] = trunk_forward(input);
+
+    // Split into mean and log_std; clamp for numerical stability
+    auto chunks  = actor_raw.chunk(2, /*dim=*/1);
+    auto mu      = chunks[0];
+    auto log_std = torch::clamp(chunks[1], -2.0f, 2.0f);
+    auto std_dev = torch::exp(log_std);
+
+    // Sample gaussian and squash
+    auto u        = mu + torch::randn_like(mu) * std_dev;
+    auto tanh_u   = torch::tanh(u);
+
+    // Log-prob with tanh correction and action-scale Jacobian
+    // log π(a|s) = log N(u; μ, σ) − log|da/du|
+    // da/du = action_scale * (1 − tanh²(u))
+    static const float log2pi_half = 0.5f * std::log(2.0f * M_PI);
+    auto log_prob_gaussian = -0.5f * torch::pow((u - mu) / std_dev, 2) - log_std
+                             - log2pi_half;
+    auto log_det = torch::log(action_scale_ * (1.0f - torch::pow(tanh_u, 2) + 1e-6f));
+    auto log_prob = (log_prob_gaussian - log_det).sum(/*dim=*/1);
+
+    // Scale to [action_lo, action_hi]
+    auto scaled = tanh_u * action_scale_ + action_bias_;
+    scaled = scaled.contiguous();
+
+    std::vector<float> actions(scaled.data_ptr<float>(),
+                               scaled.data_ptr<float>() + scaled.numel());
+    return {actions, log_prob.item<float>(), value_t.item<float>()};
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+ActorCriticImpl::evaluate(const torch::Tensor& obs, const torch::Tensor& actions)
+{
+    // obs    : [N, obs_dim]
+    // actions: [N, action_dim]  (already scaled to [action_lo, action_hi])
+
+    auto [actor_raw, values] = trunk_forward(obs);
+
+    auto chunks  = actor_raw.chunk(2, /*dim=*/1);
+    auto mu      = chunks[0];
+    auto log_std = torch::clamp(chunks[1], -2.0f, 2.0f);
+    auto std_dev = torch::exp(log_std);
+
+    // Invert scaling to get tanh output, then invert tanh to get u
+    auto tanh_u = torch::clamp((actions - action_bias_) / action_scale_,
+                               -0.999999f, 0.999999f);
+    auto u      = torch::atanh(tanh_u);
+
+    // Log-prob
+    static const float log2pi_half = 0.5f * std::log(2.0f * M_PI);
+    auto log_prob_gaussian = -0.5f * torch::pow((u - mu) / std_dev, 2) - log_std
+                             - log2pi_half;
+    auto log_det  = torch::log(action_scale_ * (1.0f - torch::pow(tanh_u, 2) + 1e-6f));
+    auto log_probs = (log_prob_gaussian - log_det).sum(/*dim=*/1, /*keepdim=*/true);
+
+    // Gaussian entropy: H = 0.5*(1 + log(2π)) + log_std  (per dimension, summed)
+    auto entropy = (0.5f + 0.5f * std::log(2.0f * M_PI) + log_std)
+                       .sum(/*dim=*/1, /*keepdim=*/true);
+
+    return {log_probs, entropy, values};
+}
+
+} // namespace rl
+

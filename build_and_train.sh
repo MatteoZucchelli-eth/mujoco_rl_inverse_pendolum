@@ -1,7 +1,9 @@
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
-
-# Run the executable
-# ./bin/mujoco_rl /workspaces/inverse_pendolum_training/checkpoints_5/actor_170.pt &
-./bin/mujoco_rl &
+#!/usr/bin/env bash
+# Convenience wrapper — delegates to scripts/train.sh.
+# All arguments are forwarded.
+#
+# Examples:
+#   ./build_and_train.sh
+#   ./build_and_train.sh -p inverse-pendulum -r run-001
+#   ./build_and_train.sh -c checkpoints_7/network_100.pt -p inverse-pendulum
+exec "$(dirname "$0")/scripts/train.sh" "$@"

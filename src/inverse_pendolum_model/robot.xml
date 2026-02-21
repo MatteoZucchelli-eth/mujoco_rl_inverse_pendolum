@@ -2,9 +2,9 @@
   <compiler angle="radian" meshdir="assets" autolimits="true" inertiafromgeom="true"/>
 
   <default>
-    <joint damping="1.0" armature="0.005"/>
-    <geom type="mesh" friction="1 0.1 0.1"/> 
-    <motor ctrlrange="-1 1" gear="10" ctrllimited="true"/>
+    <joint damping="0.0" armature="0.005"/>
+    <geom type="mesh"/> 
+    <motor ctrlrange="-1 1" gear="30" ctrllimited="true"/>
   </default>
   
   <asset>
@@ -20,13 +20,13 @@
      <geom name="guide" mesh="guide" material="guide_mat" pos="0 0 0.05" contype="0" conaffinity="0"/>
 
      <body name="base" pos="0 0 0.075">
-        <joint name="base_x_joint" type="slide" axis="1 0 0" range="-2.5 2.5" frictionloss="0.01"/>
+        <joint name="base_x_joint" type="slide" axis="1 0 0" range="-2.5 2.5" frictionloss="0.0" damping="0.0"/>
         
         <geom name="base" mesh="base" material="base_mat" mass="0.5"/>
 
         <body name="pendulum" pos="0 -0.1 0.125" euler="0 -1.5708 0">
              <joint name="pendulum_y_joint" type="hinge" axis="0 1 0" damping="0.01"/>
-             <geom name="pendulum" mesh="pendolum" material="pend_mat" mass="0.5" euler="-3.14 1.57 -3.14" contype="0" conaffinity="0"/>
+             <geom name="pendulum" mesh="pendolum" material="pend_mat" mass="1" euler="-3.14 1.57 -3.14" contype="0" conaffinity="0"/>
         </body>
      </body>
   </worldbody>

@@ -26,7 +26,11 @@ RUN apt-get update && apt-get install -y \
     ninja-build \
     wget \
     unzip \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN pip3 install --no-cache-dir wandb
 
 # Install c++ PyTorch
 RUN cd /tmp && \

@@ -46,7 +46,7 @@ void Sim::init(const char* filename) {
         int obs_offset = i * obs_dim;
         
         // Copy qpos
-        int qpos_limit = std::min(m_->nq, obs_dim);
+        int qpos_limit = std::min((int)m_->nq, obs_dim);
         for (int k = 0; k < qpos_limit; k++) {
             float val = (float)d_[0]->qpos[k];
             if ((m_->nq >= 2 && k == 1) || (m_->nq == 1 && k == 0)) {
@@ -56,7 +56,7 @@ void Sim::init(const char* filename) {
         }
         
         // Copy qvel
-        int qvel_limit = std::min(m_->nv, obs_dim - qpos_limit);
+        int qvel_limit = std::min((int)m_->nv, obs_dim - qpos_limit);
         for (int k = 0; k < qvel_limit; k++) {
             global_observation_buffer[obs_offset + qpos_limit + k] = (float)d_[0]->qvel[k];
         }
@@ -90,7 +90,7 @@ void Sim::create_model(const char* filename) {
         // 3. Print
         std::cout << "ID " << i << " [" << name << "]: " << mass << " kg" << std::endl;
     }
-    m_->opt.timestep = 0.01;
+    m_->opt.timestep = 0.005;
 
     state_dim_ = 
     1 +                 // d->time
@@ -275,7 +275,6 @@ void Sim::step_parallel(int step_idx) {
 
             double accumulated_reward = 0.0;
             bool done = false;
-            int decimation = 2;
 
             for (int j = 0; j < decimation; j++) {
                 mj_step(model, data);
@@ -337,7 +336,7 @@ void Sim::step_parallel(int step_idx) {
             int obs_offset = i * obs_dim;
             
             // Check bounds to be safe, though create_data validted nq+nv >= obs_dim
-            int qpos_limit = std::min(model->nq, obs_dim);
+            int qpos_limit = std::min((int)model->nq, obs_dim);
             
             // Copy qpos
             for (int k = 0; k < qpos_limit; k++) {
@@ -350,7 +349,7 @@ void Sim::step_parallel(int step_idx) {
             
             // Copy qvel. We continue filling the buffer from where qpos left off.
             // Ensure we don't overflow obs_dim even if model has more states than we need.
-            int qvel_limit = std::min(model->nv, obs_dim - qpos_limit);
+            int qvel_limit = std::min((int)model->nv, obs_dim - qpos_limit);
             
             for (int k = 0; k < qvel_limit; k++) {
                 global_observation_buffer[obs_offset + qpos_limit + k] = (float)data->qvel[k];
@@ -360,23 +359,11 @@ void Sim::step_parallel(int step_idx) {
     }
 }
 
-float* Sim::get_log_prob_buffer(int thread_id) {
-    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
-    return &global_log_prob_buffer[offset];
-}
-float* Sim::get_value_buffer(int thread_id) {
-    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
-    return &global_value_buffer[offset];
-}
-float* Sim::get_reward_buffer(int thread_id) {
-    size_t offset = (size_t)thread_id * envs_per_thread_; // 1 float per env
-    return &global_reward_buffer[offset];
-}
-
 float* Sim::get_observation_buffer() { return &global_observation_buffer[0]; }
-float* Sim::get_action_buffer() { return &global_action_buffer[0]; }
-float* Sim::get_log_prob_buffer() { return &global_log_prob_buffer[0]; }
-float* Sim::get_value_buffer() { return &global_value_buffer[0]; }
+float* Sim::get_action_buffer()      { return &global_action_buffer[0]; }
+float* Sim::get_log_prob_buffer()    { return &global_log_prob_buffer[0]; }
+float* Sim::get_value_buffer()       { return &global_value_buffer[0]; }
+float* Sim::get_reward_buffer()      { return &global_reward_buffer[0]; }
 
 double Sim::get_accumulated_reward(int env_id) {
     if (env_id >= 0 && env_id < num_envs) {
@@ -455,14 +442,34 @@ void Sim::run(int steps) {
         completed_episode_lengths.clear();
     }
 
-    std::cout << "Mean Batch Reward (Per Step): " << mean_reward << " | Mean Episode Return: " << mean_ep_reward << " | Mean Ep Length: " << mean_ep_len << std::endl;
-    
+    std::cout << "Mean Batch Reward (Per Step): " << mean_reward
+              << " | Mean Episode Return: " << mean_ep_reward
+              << " | Mean Ep Length: "      << mean_ep_len << std::endl;
+
     // Train Policy and Value Function
-    train();
+    rl::TrainingMetrics tm = train();
+
+    // Log all metrics to W&B (if enabled)
+    if (wandb_logger_.is_initialized()) {
+        wandb_logger_.log(current_iteration_, {
+            {"rollout/mean_step_reward",  mean_reward},
+            {"rollout/mean_ep_return",    mean_ep_reward},
+            {"rollout/mean_ep_length",    mean_ep_len},
+            {"train/actor_loss",          tm.actor_loss},
+            {"train/critic_loss",         tm.critic_loss},
+            {"train/entropy",             tm.entropy},
+        });
+    }
+    ++current_iteration_;
 }
 
-void Sim::train() {
-    controller_->updatePolicy(rollout_observations, rollout_actions, rollout_log_probs, rollout_returns, rollout_advantages);
+rl::TrainingMetrics Sim::train() {
+    return controller_->updatePolicy(rollout_observations, rollout_actions,
+                                     rollout_log_probs, rollout_returns, rollout_advantages);
+}
+
+void Sim::enable_wandb(const std::string& project, const std::string& run_name) {
+    wandb_logger_.init(project, run_name);
 }
 
 // Reward based on angle (target = pi/2) and angular velocity
@@ -485,7 +492,7 @@ double Sim::compute_reward(const mjData* d) {
     }
     
     double reward = 0.0;
-    double vel_max = 10;
+    double vel_max = 20;
     
     if (std::abs(vel_angle) > vel_max) {
         reward += -10 * ((std::abs(vel_angle) - vel_max) * (std::abs(vel_angle) - vel_max));
@@ -494,16 +501,16 @@ double Sim::compute_reward(const mjData* d) {
         // Here just swing, penalize a little the velocity but not too much
         reward += 0.5 * (std::cos(angle) - 1);
         reward += -0.01 * (vel_angle * vel_angle);
-    } else {
-        // 1. Term to maintain upright posture
-        // Minimizing angle^2
-        reward += 0.5;
-        reward += -0.01 * (angle * angle);
-        reward += -0.01 * (vel_angle * vel_angle);
-        if (std::abs(vel_angle) < 0.5) {
-            reward += 2.0;
+        } else {
+            // 1. Term to maintain upright posture
+            // Minimizing angle^2
+            reward += 0.5;
+            reward += -0.01 * (angle * angle);
+            reward += -0.01 * (vel_angle * vel_angle);
+            if (std::abs(vel_angle) < 0.5) {
+                reward += 2.0;
+            }
         }
-    }
     }
    
     

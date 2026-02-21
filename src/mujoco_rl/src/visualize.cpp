@@ -164,7 +164,7 @@ void sim_loop() {
                 if (acts) last_action = acts[0];
 
                 // Capture reward for display
-                float* rewards = g_sim->get_reward_buffer(0);
+                float* rewards = g_sim->get_reward_buffer();
                 if (rewards) last_reward = rewards[0];
 
                 // Capture cumulative reward for display
@@ -204,6 +204,12 @@ int main(int argc, char** argv) {
 
     int num_envs = sim.get_num_envs();
     int n_cores = omp_get_num_procs();
+
+    // Read ctrlrange from the loaded model
+    mjModel* vis_model = sim.get_model();
+    float action_lo = (vis_model->nu > 0) ? (float)vis_model->actuator_ctrlrange[0] : -1.0f;
+    float action_hi = (vis_model->nu > 0) ? (float)vis_model->actuator_ctrlrange[1] :  1.0f;
+
     auto controller = std::make_shared<rl::Controller>(
         sim.get_action_buffer(),
         sim.get_observation_buffer(),
@@ -212,7 +218,7 @@ int main(int argc, char** argv) {
         num_envs,
         n_cores
     );
-    controller->init();
+    controller->init(action_lo, action_hi);
     controller->load(actor_path);
     sim.set_controller(controller);
 

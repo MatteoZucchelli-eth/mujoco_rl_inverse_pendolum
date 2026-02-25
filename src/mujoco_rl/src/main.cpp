@@ -49,11 +49,20 @@ int main(int argc, char** argv) {
     // ---------------------------------------------------------------------------
     // Paths
     // ---------------------------------------------------------------------------
-    const std::string checkpoint_dir = "/workspaces/inverse_pendolum_training/checkpoints_7";
-    const std::string model_path     = "/workspaces/inverse_pendolum_training/src/inverse_pendolum_model/scene.xml";
+    const std::string base_dir   = "/workspaces/inverse_pendolum_training";
+    const std::string model_path = base_dir + "/src/inverse_pendolum_model/scene.xml";
 
-    if (!fs::exists(checkpoint_dir))
-        fs::create_directories(checkpoint_dir);
+    // Auto-create a new numbered checkpoint directory (checkpoints_1, checkpoints_2, …)
+    std::string checkpoint_dir;
+    for (int n = 1; ; ++n) {
+        std::string candidate = base_dir + "/checkpoints_" + std::to_string(n);
+        if (!fs::exists(candidate)) {
+            checkpoint_dir = candidate;
+            break;
+        }
+    }
+    fs::create_directories(checkpoint_dir);
+    std::cout << "Checkpoint directory: " << checkpoint_dir << std::endl;
 
     // ---------------------------------------------------------------------------
     // Simulation
@@ -132,7 +141,7 @@ int main(int argc, char** argv) {
     // ---------------------------------------------------------------------------
     // Training loop
     // ---------------------------------------------------------------------------
-    const int num_iterations      = 200;
+    const int num_iterations      = 500;
     const int steps_per_iteration = 3000;
 
     for (int i = start_iteration; i < start_iteration + num_iterations; ++i) {

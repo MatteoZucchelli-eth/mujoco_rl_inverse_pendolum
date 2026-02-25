@@ -171,10 +171,9 @@ void sim_loop() {
                 cumulative_reward = (float)g_sim->get_accumulated_reward(0);
             }
         }
-        // Simulation Step is 0.1s (decimation 20 * 0.005). 
-        // We sleep for 100ms to run at 1x real-time speed.
-        // Note: This results in 10 FPS visualization updates.
-        std::this_thread::sleep_until(start + std::chrono::milliseconds(100));
+        // Simulation step = decimation(4) * timestep(0.005) = 0.02s per control step.
+        // Sleep 20ms to run at 1x real-time speed (50 FPS).
+        std::this_thread::sleep_until(start + std::chrono::milliseconds(20));
     }
 }
 

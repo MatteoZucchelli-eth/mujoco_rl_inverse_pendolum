@@ -288,7 +288,7 @@ void Sim::step_parallel(int step_idx) {
                 
                 // Limit Base Position
                 if (model->nq >= 1) {
-                    if (std::abs(data->qpos[0]) > 2.4) {
+                    if (std::abs(data->qpos[0]) > 1.45) { // slider range is ±1.5
                         done = true;
                         accumulated_reward -= 20.0; // Terminal penalty (matched to per-step reward scale)
                     }
@@ -507,7 +507,7 @@ double Sim::compute_reward(const mjData* d) {
     reward += -0.05  * (base_pos * base_pos);      // keep cart centred
 
     // ---- 4. Bonus for being nearly upright and still ----
-    if (std::abs(angle) < angle_threshold && std::abs(vel_angle) < 0.5) {
+    if (std::abs(angle) < angle_threshold) {
         reward += 3.0;
     }
 

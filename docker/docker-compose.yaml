@@ -13,3 +13,5 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ../:/workspace # Bind mounts the parent directory to /workspace in the container
     tty: true
+    working_dir: /workspace
+    command: bash -c "pre-commit install"

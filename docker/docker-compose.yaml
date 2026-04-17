@@ -1,0 +1,15 @@
+name: mujoco_rl
+
+services:
+  mujoco_rl:
+    build:
+      context: .. 
+      dockerfile: docker/Dockerfile 
+    privileged: true
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY} 
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ../:/workspace # Bind mounts the parent directory to /workspace in the container
+    tty: true

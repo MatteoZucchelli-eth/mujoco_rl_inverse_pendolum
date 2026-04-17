@@ -58,7 +58,3 @@ RUN cd /tmp && \
 RUN echo 'export CMAKE_PREFIX_PATH=/app/lib/mujoco:$CMAKE_PREFIX_PATH' >> ~/.bashrc && \
     echo 'export LD_LIBRARY_PATH=/app/lib/libtorch/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 
-# Copy source files (optional for devcontainer as it mounts volume, but good for standalone build)
-COPY CMakeLists.txt /app/CMakeLists.txt
-COPY src/ /app/src/
-
